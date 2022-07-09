@@ -37,7 +37,7 @@ SSD1306AsciiWire oled;
 
 char LogFilename[] = "/Water_Quality.csv";
 
-SoftwareSerial ss(13, 12);
+HardwareSerial uart(1);
 TinyGPSPlus gps;
 
 char * getLastDateTime();
@@ -109,17 +109,17 @@ void setup() {
     oled.println("MB");
   
 
-   // GPS Module Setup stuff
-    ss.begin(9600);
+    // GPS Module Setup stuff
+    uart.begin(9600, SERIAL_8N1, 17, 16);
   
 }
 
 //------------------------------------------------------------------------------
 void loop() {
 
-  while (ss.available() > 0){
+  while (uart.available() > 0){
     // get the byte data from the GPS
-    gps.encode(ss.read());
+    gps.encode(uart.read());
   }
 
   if (gps.location.isUpdated()){
