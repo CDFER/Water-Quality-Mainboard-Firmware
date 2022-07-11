@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <DNSServer.h>
+#include <SPIFFS.h>
 
 const byte DNS_PORT = 53;
 IPAddress apIP(8,8,4,4); // The default android DNS
@@ -15,17 +16,24 @@ String responseHTML = ""
   "be redirected here.</p></body></html>";
 
 void setup() {
-  WiFi.disconnect();   //added to start with the wifi off, avoid crashing
-  WiFi.mode(WIFI_OFF); //added to start with the wifi off, avoid crashing
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(ssid, password);
-  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+    Serial.begin(9600);
+    // Initialize SPIFFS
+    if(!SPIFFS.begin(true)){
+        Serial.println("An Error has occurred while mounting SPIFFS");
+        return;
+    }
 
-  // if DNSServer is started with "*" for domain name, it will reply with
-  // provided IP to all DNS request
-  dnsServer.start(DNS_PORT, "*", apIP);
+    WiFi.disconnect();   //added to start with the wifi off, avoid crashing
+    WiFi.mode(WIFI_OFF); //added to start with the wifi off, avoid crashing
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(ssid, password);
+    WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
 
-  server.begin();
+    // if DNSServer is started with "*" for domain name, it will reply with
+    // provided IP to all DNS request
+    dnsServer.start(DNS_PORT, "*", apIP);
+
+    server.begin();
 }
 
 void loop() {
