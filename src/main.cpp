@@ -33,6 +33,11 @@ class CaptiveRequestHandler : public AsyncWebHandler {
             request->send(SPIFFS, "/style.css", "text/css");
         });
 
+        // Route to load chart javascript library
+        server.on("/chart.min.js", HTTP_GET, [](AsyncWebServerRequest *request){
+            request->send(SPIFFS, "/chart.min.js", "text/javascript");
+        });
+
         // Route to load the home page
         server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request){
             request->send(SPIFFS, "/index.html");

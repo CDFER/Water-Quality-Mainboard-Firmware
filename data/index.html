@@ -1,15 +1,34 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ESP32 Web Server</title>
+  <title>Kea Water 001</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" type="text/css" href="style.css">
+  <script src="chart.min.js"></script>
 </head>
 <body>
-  <h1>ESP32 Web Server</h1>
+  <h1>Water Quality</h1>
   <p>GPIO state: <strong> %STATE%</strong></p>
   <p><a href="/Water Quality Data.csv"><button class="button">text.txt</button></a></p>
   <p><a href="/off"><button class="button button2">OFF</button></a></p>
+  <h1>Chart.js Sample</h1>
+    <div class="chart-container" style="width: 600px; height: 400px">
+        <canvas id="countries"></canvas>
+    </div>
+        var pieData = {
+            datasets: [{
+                data: [20, 40, 10, 30],
+                backgroundColor: ["#878BB6", "#4ACAB4", "#FF8153", "#FFEA88"]
+            }]
+        };
+
+        // Get the context of the canvas element we want to select
+        var countries = document.getElementById("countries").getContext("2d");
+        new Chart(countries, {
+            type: 'pie',
+            data: pieData
+        });
+    </script>
 </body>
 </html>
