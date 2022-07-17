@@ -3,6 +3,7 @@
 
 <head>
     <title>Kea Water 001</title>
+    <link rel="icon" href="favicon.png">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="data:,">
     <link rel="stylesheet" type="text/css" href="style.css">
@@ -10,6 +11,7 @@
 </head>
 
 <body>
+    
     <div style="text-align:center;">Water Quality Data</div>
     <div class="chart-container" position: relative; height:350px; width:100%">
         <canvas id="ChartGPSLat" width="400" height="400"></canvas>
@@ -70,7 +72,7 @@
             var xhttp = new XMLHttpRequest();
             xhttp.onreadystatechange = function () {
                 if (this.readyState == 4 && this.status == 200) {
-
+                    var prevDate = ''
                     var lines = this.responseText.split("\n");
                     lines && lines.forEach((line, lineNumber) => {
                         var rowValues = line.split(",")
@@ -78,12 +80,14 @@
                             if (lineNumber == 0) { // ignore header row (other than console logging it)
                                 console.log(rowValues)
                             } else {
-                                rowValues = rowValues.map(val => val.replace('\r',''))
-                                
-                                charts.GPSLat.xAxisLabels.push(`${rowValues[0]} ${rowValues[1]}`)
+                                rowValues = rowValues.map(val => val.replace('\r','')) // clean up \r from any values
+
+                                var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
+                                prevDate = rowValues[0]
+                                charts.GPSLat.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
                                 charts.GPSLat.values.push(rowValues[2])
 
-                                charts.GPSLong.xAxisLabels.push(`${rowValues[0]} ${rowValues[1]}`)
+                                charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
                                 charts.GPSLong.values.push(rowValues[3])
                             }
                         }

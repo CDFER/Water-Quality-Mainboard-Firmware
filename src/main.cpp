@@ -12,36 +12,67 @@ AsyncWebServer server(80);
 const char *ssid = "Water Sensor 001";
 const char *password = "W7AvrwJJWg83e2";
 
+#define LOG_SIZE 100
+String logCache[LOG_SIZE]; 
+byte logCacheIndex = 0; 
+
+void log(String msg){
+    logCache[logCacheIndex++] = msg;
+    if(logCacheIndex >= LOG_SIZE) { logCacheIndex = 0; }
+}
+String getLogs(){
+    String retval = "";
+
+    for (int i=0; i < LOG_SIZE ; i++) {
+        String msg = logCache[(logCacheIndex + i) % LOG_SIZE];
+        if(msg.length() > 0) {
+            retval += msg + "\n";
+        }
+    }
+    return retval;
+}
 
 class CaptiveRequestHandler : public AsyncWebHandler {
   public:
     CaptiveRequestHandler() {
-        // Route for unknown pages
         server.onNotFound([](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", not found redirect");
             request->redirect("/index.html");
         });
 
-        // Route for root / web page
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", redirect");
             request->redirect("/index.html");
-            //request->send(SPIFFS, "/index.html");
-            //request->send(SPIFFS, "/text.txt", String(), true);
         });
         
-        server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
-            request->send(SPIFFS, "/style.css", "text/css");
+        server.on("^\\/(.*)\\.css$", HTTP_GET, [](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", response: text/css");
+            request->send(SPIFFS, "/" + request->pathArg(0) + ".css", "text/css");
         });
 
-        server.on("/chart.min.js", HTTP_GET, [](AsyncWebServerRequest *request){
-            request->send(SPIFFS, "/chart.min.js", "text/javascript");
+        server.on("^\\/(.*)\\.js$", HTTP_GET, [](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", response: text/javascript");
+            request->send(SPIFFS, "/" + request->pathArg(0) + ".js", "text/javascript");
         });
 
-        server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request){
-            request->send(SPIFFS, "/index.html");
+        server.on("^\\/(.*)\\.html$", HTTP_GET, [](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", response: html");
+            request->send(SPIFFS, "/" + request->pathArg(0) + ".html");
         });
 
-        server.on("/Water Quality Data.csv", HTTP_GET, [](AsyncWebServerRequest *request){
-            request->send(SPIFFS, "/Water Quality Data.csv", String(), true);
+        server.on("^\\/(.*)\\.csv$", HTTP_GET, [](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", response: csv");
+            request->send(SPIFFS, "/" + request->pathArg(0) + ".csv", String(), true);
+        });
+
+        server.on("^\\/(.*)\\.png$", HTTP_GET, [](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", response: image/png");
+            request->send(SPIFFS, "/" + request->pathArg(0) + ".png", "image/png");
+        });
+
+        server.on("/logs", HTTP_GET, [] (AsyncWebServerRequest *request) {
+            log("Request: " + request->url() + ", response: 200, text/plain");
+            request->send(200, "text/plain", getLogs());
         });
     }
 
