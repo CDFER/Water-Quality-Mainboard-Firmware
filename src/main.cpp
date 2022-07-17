@@ -28,22 +28,18 @@ class CaptiveRequestHandler : public AsyncWebHandler {
             //request->send(SPIFFS, "/text.txt", String(), true);
         });
         
-        // Route to load style.css file
         server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
             request->send(SPIFFS, "/style.css", "text/css");
         });
 
-        // Route to load chart javascript library
         server.on("/chart.min.js", HTTP_GET, [](AsyncWebServerRequest *request){
             request->send(SPIFFS, "/chart.min.js", "text/javascript");
         });
 
-        // Route to load the home page
         server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request){
             request->send(SPIFFS, "/index.html");
         });
 
-        // Route to load the text file
         server.on("/Water Quality Data.csv", HTTP_GET, [](AsyncWebServerRequest *request){
             request->send(SPIFFS, "/Water Quality Data.csv", String(), true);
         });
@@ -61,23 +57,6 @@ class CaptiveRequestHandler : public AsyncWebHandler {
         response->addHeader(F("Location"), F("http://4.3.2.1"));
         request->send(response);
     }
-
-    /*bool captivePortal(AsyncWebServerRequest *request){
-        if (ON_STA_FILTER(request)) return false; //only serve captive in AP mode
-        String hostH;
-        if (!request->hasHeader("Host")) return false;
-        hostH = request->getHeader("Host")->value();
-
-        if (!isIp(hostH) && hostH.indexOf("wled.me") < 0 && hostH.indexOf(cmDNS) < 0) {
-            //DEBUG_PRINTLN("Captive portal");
-            AsyncWebServerResponse *response = request->beginResponse(302);
-            response->addHeader(F("Location"), F("http://4.3.2.1"));
-            request->send(response);
-            return true;
-        }
-        return false;
-    }*/
-
 };
 
 

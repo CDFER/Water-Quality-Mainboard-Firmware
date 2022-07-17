@@ -1,34 +1,97 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-  <title>Kea Water 001</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" type="text/css" href="style.css">
-  <script src="chart.min.js"></script>
+    <title>Kea Water 001</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <script src="chart.min.js"></script>
 </head>
+
 <body>
-  <h1>Water Quality</h1>
-  <p>GPIO state: <strong> %STATE%</strong></p>
-  <p><a href="/Water Quality Data.csv"><button class="button">text.txt</button></a></p>
-  <p><a href="/off"><button class="button button2">OFF</button></a></p>
-  <h1>Chart.js Sample</h1>
-    <div class="chart-container" style="width: 600px; height: 400px">
-        <canvas id="countries"></canvas>
+    <div style="text-align:center;">Water Quality Data</div>
+    <div class="chart-container" position: relative; height:350px; width:100%">
+        <canvas id="Chart" width="400" height="400"></canvas>
     </div>
-        var pieData = {
-            datasets: [{
-                data: [20, 40, 10, 30],
-                backgroundColor: ["#878BB6", "#4ACAB4", "#FF8153", "#FFEA88"]
-            }]
+
+    <script>
+        //Graphs visit: https://www.chartjs.org
+        var data = [];
+        var dataSeries = {}
+        var timeStamp = [];
+        function showGraph() {
+            //  for (i = 0; i < arguments.length; i++) {
+            //    values.push(arguments[i]);    
+            //  }
+
+            var ctx = document.getElementById("Chart").getContext('2d');
+            var Chart2 = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data,  //Bottom Labeling
+                    datasets: [{
+                        label: "Ph",
+                        fill: false,
+                        backgroundColor: 'rgba( 18, 156, 243 , 1)', //Dot marker color
+                        borderColor: 'rgba( 18, 156, 243 , 1)', //Graph Line Color
+                        data: data,
+                    }],
+                },
+                options: {
+                    title: {
+                        display: true,
+                        text: "ADC Voltage"
+                    },
+                    maintainAspectRatio: false,
+                    elements: {
+                        line: {
+                            tension: 0.2 //Smoothening (Curved) of data lines
+                        }
+                    }
+                }
+            });
+
+        }
+
+        //On Page load show graphs
+        window.onload = function () {
+            getData();
         };
 
-        // Get the context of the canvas element we want to select
-        var countries = document.getElementById("countries").getContext("2d");
-        new Chart(countries, {
-            type: 'pie',
-            data: pieData
-        });
+        //Ajax script to get ADC voltage at every 5 Seconds 
+
+        // setInterval(function() {
+        //   // Call a function repetatively with 5 Second interval
+        //   getData();
+        // }, 5000); 
+
+        function getData() {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function () {
+                if (this.readyState == 4 && this.status == 200) {
+                    var lines = this.responseText.split("\n");
+                    lines && lines.forEach((line, lineNumber) => {
+                        var rowValues = line.split(",")
+                        if (lineNumber == 0) { // header row
+                            rowValues.forEach(value => {
+                                dataSeries[value] = []
+                            })
+                        } else {
+                            rowValues.forEach(value => {
+                                data.push(value)
+                            })
+                        }
+                    })
+
+                    showGraph();
+                }
+            };
+            xhttp.open("GET", "Water Quality Data.csv", true);
+            xhttp.send();
+        }
+
     </script>
 </body>
+
 </html>
