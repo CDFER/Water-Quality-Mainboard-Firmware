@@ -12,37 +12,48 @@
 <body>
     <div style="text-align:center;">Water Quality Data</div>
     <div class="chart-container" position: relative; height:350px; width:100%">
-        <canvas id="Chart" width="400" height="400"></canvas>
+        <canvas id="ChartGPSLat" width="400" height="400"></canvas>
+    </div>
+    <div class="chart-container" position: relative; height:350px; width:100%">
+        <canvas id="ChartGPSLong" width="400" height="400"></canvas>
     </div>
 
-    <script>
-        //Graphs visit: https://www.chartjs.org
-        var data = [];
-        var dataSeries = {}
-        var timeStamp = [];
-        function showGraph() {
-            //  for (i = 0; i < arguments.length; i++) {
-            //    values.push(arguments[i]);    
-            //  }
 
-            var ctx = document.getElementById("Chart").getContext('2d');
-            var Chart2 = new Chart(ctx, {
+    <script>
+        const numberOfDataSeries = 2
+        var charts = {
+            GPSLat: {
+                canvasID: "ChartGPSLat",
+                chartTitle: "GPS Lattitude",
+                xAxisLabels: [],
+                values: []
+            },
+            GPSLong: {
+                canvasID: "ChartGPSLong",
+                chartTitle: "GPS Longitude",
+                xAxisLabels: [],
+                values: []
+            }
+        }
+        function showGraph({
+            canvasID,
+            chartTitle,
+            xAxisLabels,
+            values
+        }) {
+            new Chart(document.getElementById(canvasID).getContext('2d'), {
                 type: 'line',
                 data: {
-                    labels: data,  //Bottom Labeling
+                    labels: xAxisLabels,  //Bottom Labeling
                     datasets: [{
-                        label: "Ph",
+                        label: chartTitle,
                         fill: false,
                         backgroundColor: 'rgba( 18, 156, 243 , 1)', //Dot marker color
                         borderColor: 'rgba( 18, 156, 243 , 1)', //Graph Line Color
-                        data: data,
+                        data: values
                     }],
                 },
                 options: {
-                    title: {
-                        display: true,
-                        text: "ADC Voltage"
-                    },
                     maintainAspectRatio: false,
                     elements: {
                         line: {
@@ -51,40 +62,35 @@
                     }
                 }
             });
-
         }
 
-        //On Page load show graphs
-        window.onload = function () {
-            getData();
-        };
-
-        //Ajax script to get ADC voltage at every 5 Seconds 
-
-        // setInterval(function() {
-        //   // Call a function repetatively with 5 Second interval
-        //   getData();
-        // }, 5000); 
+        window.onload = getData
 
         function getData() {
             var xhttp = new XMLHttpRequest();
             xhttp.onreadystatechange = function () {
                 if (this.readyState == 4 && this.status == 200) {
+
                     var lines = this.responseText.split("\n");
                     lines && lines.forEach((line, lineNumber) => {
                         var rowValues = line.split(",")
-                        if (lineNumber == 0) { // header row
-                            rowValues.forEach(value => {
-                                dataSeries[value] = []
-                            })
-                        } else {
-                            rowValues.forEach(value => {
-                                data.push(value)
-                            })
+                        if (rowValues.length == (numberOfDataSeries + 2)) { // skip incomplete lines
+                            if (lineNumber == 0) { // ignore header row (other than console logging it)
+                                console.log(rowValues)
+                            } else {
+                                rowValues = rowValues.map(val => val.replace('\r',''))
+                                
+                                charts.GPSLat.xAxisLabels.push(`${rowValues[0]} ${rowValues[1]}`)
+                                charts.GPSLat.values.push(rowValues[2])
+
+                                charts.GPSLong.xAxisLabels.push(`${rowValues[0]} ${rowValues[1]}`)
+                                charts.GPSLong.values.push(rowValues[3])
+                            }
                         }
                     })
 
-                    showGraph();
+                    showGraph(charts.GPSLat);
+                    showGraph(charts.GPSLong);
                 }
             };
             xhttp.open("GET", "Water Quality Data.csv", true);
