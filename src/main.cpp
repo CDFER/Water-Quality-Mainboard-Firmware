@@ -67,7 +67,17 @@ class CaptiveRequestHandler : public AsyncWebHandler {
 
         server.on("^\\/(.*)\\.png$", HTTP_GET, [](AsyncWebServerRequest *request){
             log("Request: " + request->url() + ", response: image/png");
-            request->send(SPIFFS, "/" + request->pathArg(0) + ".png", "image/png");
+            request->send(SPIFFS, "/" + request->pathArg(0) + ".png");
+        });
+
+        server.on("^\\/(.*)\\.svg$", HTTP_GET, [](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", response: image/svg+xml");
+            request->send(SPIFFS, "/" + request->pathArg(0) + ".svg");
+        });
+
+        server.on("^\\/(.*)\\.woff2$", HTTP_GET, [](AsyncWebServerRequest *request){
+            log("Request: " + request->url() + ", response: font/woff2");
+            request->send(SPIFFS, "/" + request->pathArg(0) + ".woff2");
         });
 
         server.on("/logs", HTTP_GET, [] (AsyncWebServerRequest *request) {
