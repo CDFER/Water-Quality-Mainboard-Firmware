@@ -348,7 +348,7 @@
 
                                 var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
                                 prevDate = rowValues[0]
-                                //charts.GPSLat.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
+                                apexChartOptions.xaxis.categories.push(`${dateStr} ${rowValues[1]}`)
                                 apexChartOptions.series[0].data.push(rowValues[2])
 
                                 //charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
