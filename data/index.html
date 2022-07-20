@@ -286,7 +286,7 @@
         var apexChartOptions = {
             series: [{
                 name: 'series1',
-                data: [1,2,3,4,5,6,7,8,9,10]
+                data: []
             }],
             chart: {
                 height: 80,
@@ -306,8 +306,7 @@
                 enabled: false
             },
             xaxis: {
-                type: 'datetime',
-                categories: ["2018-09-19T00:00:00.000Z", "2018-09-19T01:30:00.000Z", "2018-09-19T02:30:00.000Z", "2018-09-19T03:30:00.000Z", "2018-09-19T04:30:00.000Z", "2018-09-19T05:30:00.000Z", "2018-09-19T06:30:00.000Z", "2018-09-19T07:30:00.000Z", "2018-09-19T08:30:00.000Z", "2018-09-19T09:30:00.000Z", "2018-09-19T10:30:00.000Z", "2018-09-19T11:30:00.000Z"],
+                categories: [],
                 axisBorder: {
                     show: false
                 },
@@ -352,7 +351,7 @@
                                 var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
                                 prevDate = rowValues[0]
                                 //charts.GPSLat.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
-                                //charts.GPSLat.values.push(rowValues[2])
+                                apexChartOptions.series.data.push(rowValues[2])
 
                                 //charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
                                 //charts.GPSLong.values.push(rowValues[3])
