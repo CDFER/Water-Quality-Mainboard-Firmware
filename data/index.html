@@ -304,7 +304,7 @@
                 enabled: false
             },
             xaxis: {
-                categories: [],
+                type: 'category',
                 axisBorder: {
                     show: false
                 },
@@ -323,7 +323,7 @@
             },
             tooltip: {
                 x: {
-                    format: 'dd/MM/yy HH:mm'
+                    show: false
                 },
             },
         }
@@ -341,15 +341,15 @@
                     lines && lines.forEach((line, lineNumber) => {
                         var rowValues = line.split(",")
                         if (rowValues.length == (numberOfDataSeries + 2)) { // skip incomplete lines
-                            if (lineNumber == 0) { // ignore header row (other than console logging it)
-                                console.log(rowValues)
-                            } else {
+                            if (lineNumber > 0) { // ignore header row
                                 rowValues = rowValues.map(val => val.replace('\r', '')) // clean up \r from any values
 
                                 var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
                                 prevDate = rowValues[0]
-                                apexChartOptions.xaxis.categories.push(`${dateStr} ${rowValues[1]}`)
-                                apexChartOptions.series[0].data.push(rowValues[2])
+                                apexChartOptions.series[0].data.push({
+                                    x: `${rowValues[0]} ${rowValues[1]}`,
+                                    y: rowValues[2]
+                                })
 
                                 //charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
                                 //charts.GPSLong.values.push(rowValues[3])
