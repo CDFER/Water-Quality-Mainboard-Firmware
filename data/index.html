@@ -205,10 +205,10 @@
                             <div class="col-12">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h4>PH Level</h4>
+                                        <h4>GPS Lattitude</h4>
                                     </div>
                                     <div class="card-body">
-                                        <div id="chart-profile-visit"></div>
+                                        <div id="chartGPSLat"></div>
                                     </div>
                                 </div>
                             </div>
@@ -283,80 +283,55 @@
 
 
     <script>
-
-        const numberOfDataSeries = 2
-        var charts = {
-            GPSLat: {
-                canvasID: "ChartGPSLat",
-                chartTitle: "GPS Lattitude",
-                xAxisLabels: [],
-                values: []
-            },
-            GPSLong: {
-                canvasID: "ChartGPSLong",
-                chartTitle: "GPS Longitude",
-                xAxisLabels: [],
-                values: []
-            }
-        }
-
-
-        function showGraph({
-            canvasID,
-            chartTitle,
-            xAxisLabels,
-            values
-        }) {
-            var optionsDashboardMini = {
-                series: [{
-                    name: 'series1',
-                    data: values
-                }],
-                chart: {
-                    height: 80,
-                    type: 'area',
-                    toolbar: {
-                        show: false,
-                    },
-                },
-                colors: ['#5350e9'],
-                stroke: {
-                    width: 2,
-                },
-                grid: {
+        var apexChartOptions = {
+            series: [{
+                name: 'series1',
+                data: [1,2,3,4,5,6,7,8,9,10]
+            }],
+            chart: {
+                height: 80,
+                type: 'area',
+                toolbar: {
                     show: false,
                 },
-                dataLabels: {
-                    enabled: false
-                },
-                xaxis: {
-                    type: 'datetime',
-                    categories: ["2018-09-19T00:00:00.000Z", "2018-09-19T01:30:00.000Z", "2018-09-19T02:30:00.000Z", "2018-09-19T03:30:00.000Z", "2018-09-19T04:30:00.000Z", "2018-09-19T05:30:00.000Z", "2018-09-19T06:30:00.000Z", "2018-09-19T07:30:00.000Z", "2018-09-19T08:30:00.000Z", "2018-09-19T09:30:00.000Z", "2018-09-19T10:30:00.000Z", "2018-09-19T11:30:00.000Z"],
-                    axisBorder: {
-                        show: false
-                    },
-                    axisTicks: {
-                        show: false
-                    },
-                    labels: {
-                        show: false,
-                    }
-                },
+            },
+            colors: ['#5350e9'],
+            stroke: {
+                width: 2,
+            },
+            grid: {
                 show: false,
-                yaxis: {
-                    labels: {
-                        show: false,
-                    },
+            },
+            dataLabels: {
+                enabled: false
+            },
+            xaxis: {
+                type: 'datetime',
+                categories: ["2018-09-19T00:00:00.000Z", "2018-09-19T01:30:00.000Z", "2018-09-19T02:30:00.000Z", "2018-09-19T03:30:00.000Z", "2018-09-19T04:30:00.000Z", "2018-09-19T05:30:00.000Z", "2018-09-19T06:30:00.000Z", "2018-09-19T07:30:00.000Z", "2018-09-19T08:30:00.000Z", "2018-09-19T09:30:00.000Z", "2018-09-19T10:30:00.000Z", "2018-09-19T11:30:00.000Z"],
+                axisBorder: {
+                    show: false
                 },
-                tooltip: {
-                    x: {
-                        format: 'dd/MM/yy HH:mm'
-                    },
+                axisTicks: {
+                    show: false
                 },
-            }
-            var chartEurope = new ApexCharts(document.querySelector("#chart-europe"), optionsDashboardMini);
-            chartEurope.render();
-        };
+                labels: {
+                    show: false,
+                }
+            },
+            show: false,
+            yaxis: {
+                labels: {
+                    show: false,
+                },
+            },
+            tooltip: {
+                x: {
+                    format: 'dd/MM/yy HH:mm'
+                },
+            },
+        }
+        var chart1 = new ApexCharts(document.querySelector("#chartGPSLat"), apexChartOptions);
+        chart1.render();
 
         window.onload = getData
 
@@ -376,15 +351,14 @@
 
                                 var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
                                 prevDate = rowValues[0]
-                                charts.GPSLat.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
-                                charts.GPSLat.values.push(rowValues[2])
+                                //charts.GPSLat.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
+                                //charts.GPSLat.values.push(rowValues[2])
 
-                                charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
-                                charts.GPSLong.values.push(rowValues[3])
+                                //charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
+                                //charts.GPSLong.values.push(rowValues[3])
                             }
                         }
                     })
-                    showGraph(charts.GPSLat);
                 }
             };
             xhttp.open("GET", "Water Quality Data.csv", true);
