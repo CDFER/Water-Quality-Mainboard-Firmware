@@ -19,7 +19,7 @@
                 <div class="sidebar-header position-relative">
                     <div class="d-flex justify-content-between align-items-center">
                         <div class="logo">
-                            <a href="index.html"><img src="assets/logo.svg" alt="Logo" srcset=""></a>
+                            <!-- <a href="index.html"><img src="assets/logo.svg" alt="Logo" srcset=""></a> -->
                         </div>
                         <div class="theme-toggle d-flex gap-2  align-items-center mt-2">
                             <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -365,87 +365,6 @@
 
     </script>
 
-    <!-- <script>
-        const numberOfDataSeries = 2
-        var charts = {
-            GPSLat: {
-                canvasID: "ChartGPSLat",
-                chartTitle: "GPS Lattitude",
-                xAxisLabels: [],
-                values: []
-            },
-            GPSLong: {
-                canvasID: "ChartGPSLong",
-                chartTitle: "GPS Longitude",
-                xAxisLabels: [],
-                values: []
-            }
-        }
-        function showGraph({
-            canvasID,
-            chartTitle,
-            xAxisLabels,
-            values
-        }) {
-            new Chart(document.getElementById(canvasID).getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: xAxisLabels,  //Bottom Labeling
-                    datasets: [{
-                        label: chartTitle,
-                        fill: false,
-                        backgroundColor: 'rgba( 18, 156, 243 , 1)', //Dot marker color
-                        borderColor: 'rgba( 18, 156, 243 , 1)', //Graph Line Color
-                        data: values
-                    }],
-                },
-                options: {
-                    maintainAspectRatio: false,
-                    elements: {
-                        line: {
-                            tension: 0.2 //Smoothening (Curved) of data lines
-                        }
-                    }
-                }
-            });
-        }
-
-        window.onload = getData
-
-        function getData() {
-            var xhttp = new XMLHttpRequest();
-            xhttp.onreadystatechange = function () {
-                if (this.readyState == 4 && this.status == 200) {
-                    var prevDate = ''
-                    var lines = this.responseText.split("\n");
-                    lines && lines.forEach((line, lineNumber) => {
-                        var rowValues = line.split(",")
-                        if (rowValues.length == (numberOfDataSeries + 2)) { // skip incomplete lines
-                            if (lineNumber == 0) { // ignore header row (other than console logging it)
-                                console.log(rowValues)
-                            } else {
-                                rowValues = rowValues.map(val => val.replace('\r','')) // clean up \r from any values
-
-                                var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
-                                prevDate = rowValues[0]
-                                charts.GPSLat.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
-                                charts.GPSLat.values.push(rowValues[2])
-
-                                charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
-                                charts.GPSLong.values.push(rowValues[3])
-                            }
-                        }
-                    })
-
-                    showGraph(charts.GPSLat);
-                    showGraph(charts.GPSLong);
-                }
-            };
-            xhttp.open("GET", "Water Quality Data.csv", true);
-            xhttp.send();
-        }
-
-    </script> -->
 
 </body>
 
