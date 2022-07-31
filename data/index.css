@@ -1,0 +1,64 @@
+body {
+    margin: 0;
+    background-color: #111;
+    font-family: "Lato", sans-serif;
+}
+
+div.debug { /* remove debug to enable */
+    border-width: 1px;
+    border-color: #818181;
+    border-style: dotted;
+}
+
+.page {
+    display: flex;
+}
+
+.content {
+    overflow: auto;
+    height: 100vh;
+}
+
+.content>p {
+    color: beige;
+}
+
+.activeIndicator {
+    display: flex;
+    height: 32px;
+    width: 56px;
+    border-radius: 16px;
+    margin: 0px 12px 4px 12px;
+}
+
+.icon {
+    height: 24px;
+    width: 24px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 4px;
+}
+
+.sideBar {
+    display: flex;
+    flex-direction: column;
+    width: 80px;
+    justify-content: center;
+}
+
+.sideBar>a {
+    text-decoration: none;
+    padding-bottom: 12px;
+}
+
+.sideBar>a>.item>.label {
+    font-weight: 600;
+    font-size: 12px;
+    color: #818181;
+    text-align: center;
+}
+
+.sideBar>a>.item:hover .activeIndicator,
+.selected {
+    background-color: #28242f;
+}
