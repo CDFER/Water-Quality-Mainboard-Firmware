@@ -110,4 +110,90 @@
     </div>
 </body>
 
+<script>
+    var numberOfDataSeries = 2
+    var apexChartOptions = {
+        series: [{
+            name: 'series1',
+            data: []
+        }],
+        chart: {
+            height: 350,
+            type: 'area',
+            toolbar: {
+                show: false,
+            },
+        },
+        // colors: ['#5350e9'],
+        // stroke: {
+        //     width: 2,
+        // },
+        // grid: {
+        //     show: false,
+        // },
+        dataLabels: {
+            enabled: false
+        },
+        // xaxis: {
+        //     type: 'category',
+        //     axisBorder: {
+        //         show: false
+        //     },
+        //     axisTicks: {
+        //         show: false
+        //     },
+        //     labels: {
+        //         show: false,
+        //     }
+        // },
+        // show: false,
+        // yaxis: {
+        //     labels: {
+        //         show: false,
+        //     },
+        // },
+        // tooltip: {
+        //     x: {
+        //         show: false
+        //     },
+        // },
+    }
+    var chart1 = new ApexCharts(document.querySelector("#chartGPSLat"), apexChartOptions);
+    // chart1.render();
+
+    window.onload = getData
+
+    function getData() {
+        var xhttp = new XMLHttpRequest();
+        xhttp.onreadystatechange = function () {
+            if (this.readyState == 4 && this.status == 200) {
+                var prevDate = ''
+                var lines = this.responseText.split("\n");
+                lines && lines.forEach((line, lineNumber) => {
+                    var rowValues = line.split(",")
+                    if (rowValues.length == (numberOfDataSeries + 2)) { // skip incomplete lines
+                        if (lineNumber > 0) { // ignore header row
+                            rowValues = rowValues.map(val => val.replace('\r', '')) // clean up \r from any values
+
+                            var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
+                            prevDate = rowValues[0]
+                            apexChartOptions.series[0].data.push({
+                                x: `${rowValues[0]} ${rowValues[1]}`,
+                                y: rowValues[2]
+                            })
+
+                            //charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
+                            //charts.GPSLong.values.push(rowValues[3])
+                        }
+                    }
+                })
+                chart1.render()
+            }
+        };
+        xhttp.open("GET", "Water Quality Data.csv", true);
+        xhttp.send();
+    }
+
+</script>
+
 </html>
