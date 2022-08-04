@@ -13,6 +13,8 @@ AsyncWebServer server(80);
 const char *ssid = "Water Sensor 001";
 const char *password = "W7AvrwJJWg83e2";
 
+#define ADC_PIN 36
+
 struct Button{
     const uint8_t PIN;
     uint32_t numberKeyPresses;
@@ -34,8 +36,8 @@ void IRAM_ATTR isr(){
     }
 }
 
-class CaptiveRequestHandler : public AsyncWebHandler
-{
+
+class CaptiveRequestHandler : public AsyncWebHandler{
 public:
     CaptiveRequestHandler()
     {
@@ -106,12 +108,31 @@ void setup(){
     // Setup GPIO ==================================================
     pinMode(button1.PIN, INPUT_PULLUP);
     attachInterrupt(button1.PIN, isr, FALLING);
+
+    analogReadResolution(12);
 }
 
 void loop(){
     dnsServer.processNextRequest();
     if (button1.pressed){
-        Serial.printf("Button has been pressed %u times\n", button1.numberKeyPresses);
+        int data = analogRead(ADC_PIN);
+        Serial.println(analogRead(ADC_PIN));
+
+        File fileToAppend = SPIFFS.open("/assets/Water Quality Data.csv", FILE_APPEND);
+    
+        if(!fileToAppend){
+            Serial.println("There was an error opening the file for appending");
+            return;
+        }
+    
+        if(fileToAppend.println(data)){
+            //Serial.println("File content was appended");
+        } else {
+            Serial.println("File append failed");
+        }
+    
+        fileToAppend.close();
+        
         button1.pressed = false;
     }
 }
