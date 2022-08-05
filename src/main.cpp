@@ -6,6 +6,18 @@
 #include "ESPAsyncWebServer.h"
 #include <SPIFFS.h>
 
+// Lib for GPS Module
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+
+char LogFilename[] = "/assets/Water Quality Data.csv";
+
+HardwareSerial uart(1);
+TinyGPSPlus gps;
+
+void appendLineToCSV();
+
+
 const byte DNS_PORT = 53;
 IPAddress apIP(4, 3, 2, 1);
 DNSServer dnsServer;
@@ -108,31 +120,78 @@ void setup(){
     // Setup GPIO ==================================================
     pinMode(button1.PIN, INPUT_PULLUP);
     attachInterrupt(button1.PIN, isr, FALLING);
-
     analogReadResolution(12);
+
+    // GPS Module Setup stuff
+    uart.begin(9600, SERIAL_8N1, 17, 16);
 }
 
 void loop(){
     dnsServer.processNextRequest();
-    if (button1.pressed){
-        int data = analogRead(ADC_PIN);
-        Serial.println(analogRead(ADC_PIN));
 
-        File fileToAppend = SPIFFS.open("/assets/Water Quality Data.csv", FILE_APPEND);
-    
-        if(!fileToAppend){
-            Serial.println("There was an error opening the file for appending");
-            return;
-        }
-    
-        if(fileToAppend.println(data)){
-            //Serial.println("File content was appended");
-        } else {
-            Serial.println("File append failed");
-        }
-    
-        fileToAppend.close();
+    while (uart.available() > 0){
+        // get the byte data from the GPS
+        gps.encode(uart.read());
+    }
+
+    if (button1.pressed){
+        int temperature = analogRead(ADC_PIN);
         
+        appendLineToCSV();
         button1.pressed = false;
     }
 }
+
+void appendLineToCSV(){
+
+    File CSV = SPIFFS.open(LogFilename, FILE_APPEND);
+    
+    if(!CSV){
+        Serial.print("Error opening ");
+        Serial.println(LogFilename);
+        return;
+    }
+
+    CSV.print("\n");
+
+    //UTC_Date(YY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters)
+    if (!gps.date.isValid()){
+        Serial.print(F("**-**-**,"));
+
+    }else{
+        char sz[32];
+        sprintf(sz, "%02d-%02d-%02d,", gps.date.year(), gps.date.month(), gps.date.day());
+        CSV.print(sz);
+    }
+    
+    if (!gps.time.isValid()){
+        CSV.print(F("**-**-**,"));
+
+    }else{
+        char sz[32];
+        sprintf(sz, "%02d:%02d:%02d,", gps.time.hour(), gps.time.minute(), gps.time.second());
+        CSV.print(sz);
+    }
+
+    if (!gps.location.isValid()){
+        CSV.print(F("***.******,***.******"));
+
+    }else{
+        CSV.print(gps.location.lat(),6);//6dp
+        CSV.print(",");
+        CSV.print(gps.location.lng(),6);
+        CSV.print(",");
+    }
+
+    if (!gps.altitude.isValid()){
+        CSV.print(F("***"));
+
+    }else{
+        CSV.print(gps.altitude.meters(),0);//0dp
+        CSV.print(",");
+    }
+
+
+    CSV.close();
+}
+
