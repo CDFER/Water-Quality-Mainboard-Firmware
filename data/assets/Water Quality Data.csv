@@ -1,1 +1,1 @@
-UTC_Date,UTC_Time,Latitude(Decimal),Longitude(Decimal)
+UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Temp(ADC mV),TDS(ADC mV),

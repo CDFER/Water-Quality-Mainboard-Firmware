@@ -189,20 +189,19 @@ void readADC(adc1_channel_t channel, uint16_t *value){
 
 void appendLineToCSV(){
 
-    File CSV = SPIFFS.open(LogFilename, FILE_APPEND);
+    File CSV = SPIFFS.open(F(LogFilename), FILE_APPEND);
     
     if(!CSV){
-        Serial.print("Error opening ");
-        Serial.println(LogFilename);
+        Serial.print(F("Error opening "));
+        Serial.println(F(LogFilename));
         return;
     }
 
     CSV.print("\n");
 
-    //UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters)
+    //UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Temp(ADC mV),TDS(ADC mV),
     if (!gps.date.isValid()){
         Serial.print(F("****-**-**,"));
-
     }else{
         char sz[32];
         sprintf(sz, "%02d-%02d-%02d,", gps.date.year(), gps.date.month(), gps.date.day());
@@ -211,7 +210,6 @@ void appendLineToCSV(){
     
     if (!gps.time.isValid()){
         CSV.print(F("**-**-**,"));
-
     }else{
         char sz[32];
         sprintf(sz, "%02d:%02d:%02d,", gps.time.hour(), gps.time.minute(), gps.time.second());
@@ -219,21 +217,25 @@ void appendLineToCSV(){
     }
 
     if (!gps.location.isValid()){
-        CSV.print(F("***.******,***.******"));
+        CSV.print(F("***.******,***.******,"));
     }else{
         CSV.print(gps.location.lat(),6);//6dp
-        CSV.print(",");
+        CSV.print(F(","));
         CSV.print(gps.location.lng(),6);
-        CSV.print(",");
+        CSV.print(F(","));
     }
 
     if (!gps.altitude.isValid()){
-        CSV.print(F("***"));
+        CSV.print(F("***,"));
     }else{
         CSV.print(gps.altitude.meters(),0);//0dp
-        CSV.print(",");
+        CSV.print(F(","));
     }
 
+    CSV.print(tempValue,0);//0dp
+    CSV.print(F(","));
+    CSV.print(tdsValue,0);//0dp
+    CSV.print(F(","));
     // TODO print the tempValue & tdsValue & any others
 
     CSV.close();
