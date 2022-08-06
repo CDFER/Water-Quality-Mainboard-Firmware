@@ -209,7 +209,7 @@ void appendLineToCSV(){
     }
     
     if (!gps.time.isValid()){
-        CSV.print(F("**-**-**,"));
+        CSV.print(F("**:**:**,"));
     }else{
         char sz[32];
         sprintf(sz, "%02d:%02d:%02d,", gps.time.hour(), gps.time.minute(), gps.time.second());
@@ -232,11 +232,10 @@ void appendLineToCSV(){
         CSV.print(F(","));
     }
 
-    CSV.print(tempValue,0);//0dp
+    CSV.print(tempValue,0);//0dp, normally 4 digits
     CSV.print(F(","));
-    CSV.print(tdsValue,0);//0dp
+    CSV.print(tdsValue,0);//0dp, normally 4 digits
     CSV.print(F(","));
-    // TODO print the tempValue & tdsValue & any others
 
     CSV.close();
 }

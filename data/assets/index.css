@@ -21,19 +21,19 @@ div.debug { /* remove debug to enable */
     padding: 20px;
 }
 
-#chart {
+.chart {
     border-radius: 12px;
     background: #004880;
     padding: 12px; 
 }
 
-#card {
+.card {
     border-radius: 12px;
     background: #252728;
     padding: 0px; 
 }
 
-#cardContent {
+.cardContent {
     padding: 16px; 
 }
 
@@ -54,7 +54,7 @@ p  {
     margin-bottom: 0px;
 }
 
-#cardButton {
+.cardButton {
     text-decoration: none;
     width: fit-content;
     border-radius: 24px;

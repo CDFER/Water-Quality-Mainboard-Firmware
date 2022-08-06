@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="index.css">
     <script src="apexcharts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 </head>
 <script>
     function select(element) {
@@ -59,28 +58,26 @@
             </a>
         </div>
         <div class="content">
-            <div id="card">
-                <div id="chart"></div>
-                <div id="cardContent">
+            <div class="card">
+                <div class="chart" id="chart1"></div>
+                <div class="cardContent">
                     <h1>Temperature</h1>
                     <p>Mesured in degrees celcius, this Sensor uses a K type thermocouple operating at 3.3v</p>
                     <a href="calibrate" style="text-decoration: none;">
-                        <div id="cardButton">Calibrate</div>
+                        <div class="cardButton">Calibrate</div>
                     </a>
                 </div>
-
             </div>
-
         </div>
     </div>
 </body>
 
 <script>
-    var options = {
+    var apexChartOptions = {
         series: [
             {
                 name: "Temperature",
-                data: [null, 28, 29, 33, 36, 32, 32, 33, null]
+                data: []
             }
         ],
         chart: {
@@ -150,7 +147,6 @@
             }
         },
         xaxis: {
-            categories: [' ', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', ' '],
             axisTicks: {
                 color: '#d3e4ff',
             },
@@ -169,7 +165,7 @@
 
         yaxis: {
             title: {
-                text: 'Temperature (°c)',
+                text: 'Temperature (\xB0C)',
                 style: {
                     // color: '#d3e4ff',
                     fontSize: '12px',
@@ -195,8 +191,67 @@
         },
     };
 
-    var chart = new ApexCharts(document.querySelector("#chart"), options);
-    chart.render();
+    var chart1 = new ApexCharts(document.querySelector("#chart1"), apexChartOptions);
+    // chart.render();
+
+    window.onload = getData
+
+    function getData() {
+        apexChartOptions.series[0].data.push({
+            x: `1`,
+            y: 1
+        })
+        apexChartOptions.series[0].data.push({
+            x: `2`,
+            y: 2
+        })
+        apexChartOptions.series[0].data.push({
+            x: `4`,
+            y: 4
+        })
+        apexChartOptions.series[0].data.push({
+            x: `8`,
+            y: 8
+        })
+        apexChartOptions.series[0].data.push({
+            x: `16`,
+            y: 16
+        })
+
+        chart1.render()
+    }
+
+    function x() {
+        var xhttp = new XMLHttpRequest();
+        xhttp.onreadystatechange = function () {
+            if (this.readyState == 4 && this.status == 200) {
+                var prevDate = ''
+                var lines = this.responseText.split("\n");
+                lines && lines.forEach((line, lineNumber) => {
+                    var rowValues = line.split(",")
+                    if (rowValues.length == (numberOfDataSeries + 2)) { // skip incomplete lines
+                        if (lineNumber > 0) { // ignore header row
+                            rowValues = rowValues.map(val => val.replace('\r', '')) // clean up \r from any values
+
+                            var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
+                            prevDate = rowValues[0]
+                            apexChartOptions.series[0].data.push({
+                                x: `${rowValues[0]} ${rowValues[1]}`,
+                                y: rowValues[2]
+                            })
+
+                            //charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
+                            //charts.GPSLong.values.push(rowValues[3])
+                        }
+                    }
+                })
+                chart1.render()
+            }
+        };
+        xhttp.open("GET", "Water Quality Data.csv", true);
+        xhttp.send();
+    }
+
 </script>
 
 <script>
