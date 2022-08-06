@@ -20,33 +20,33 @@
             <a href="#download">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator selected">
-                        <img class="icon" src="download.svg">
+                        <img class="icon" src="temperature.svg">
                     </div>
-                    <div class="label">Download</div>
+                    <div class="label">Temperature</div>
                 </div>
             </a>
             <a href="#home">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator">
-                        <img class="icon" src="select.svg">
+                        <img class="icon" src="tds.svg">
                     </div>
-                    <div class="label">Home</div>
+                    <div class="label">TDS</div>
                 </div>
             </a>
             <a href="#services">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator">
-                        <img class="icon" src="download.svg">
+                        <img class="icon" src="turbidity.svg">
                     </div>
-                    <div class="label">Services</div>
+                    <div class="label">Turbidity</div>
                 </div>
             </a>
             <a href="#clients">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator">
-                        <img class="icon" src="download.svg">
+                        <img class="icon" src="pH.svg">
                     </div>
-                    <div class="label">Clients</div>
+                    <div class="label">pH</div>
                 </div>
             </a>
             <a href="#contact">
@@ -54,7 +54,7 @@
                     <div class="activeIndicator">
                         <img class="icon" src="download.svg">
                     </div>
-                    <div class="label">Contact</div>
+                    <div class="label">Download</div>
                 </div>
             </a>
         </div>
@@ -80,12 +80,18 @@
         series: [
             {
                 name: "Temperature",
-                data: [28, 29, 33, 36, 32, 32, 33]
+                data: [null, 28, 29, 33, 36, 32, 32, 33, null]
             }
         ],
         chart: {
             type: 'line',
             height: 350,
+            background: '#004880',
+            animations: {
+                easing: 'easein',
+            },
+            fontFamily: 'Lato, sans-serif',
+            foreColor: '#d3e4ff',
             zoom: {
                 enabled: true,
                 autoScaleYaxis: false,
@@ -111,7 +117,6 @@
                     zoomout: '<img class="icon" src="zoom_out.svg" width="50">',
                     pan: false,
                     reset: '<img class="icon" src="zoom_out_map.svg" width="50">',
-                    customIcons: []
                 }
             },
         },
@@ -145,7 +150,7 @@
             }
         },
         xaxis: {
-            categories: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'],
+            categories: [' ', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', ' '],
             axisTicks: {
                 color: '#d3e4ff',
             },
@@ -154,9 +159,9 @@
             },
             labels: {
                 style: {
-                    colors: '#d3e4ff',
+                    // colors: '#d3e4ff',
                     fontSize: '12px',
-                    fontFamily: 'Lato, sans-serif',
+                    // fontFamily: 'Lato, sans-serif',
                     fontWeight: 300,
                 },
             },
@@ -166,9 +171,9 @@
             title: {
                 text: 'Temperature (°c)',
                 style: {
-                    color: '#d3e4ff',
+                    // color: '#d3e4ff',
                     fontSize: '12px',
-                    fontFamily: 'Lato, sans-serif',
+                    // fontFamily: 'Lato, sans-serif',
                     fontWeight: 300,
                 },
             },
