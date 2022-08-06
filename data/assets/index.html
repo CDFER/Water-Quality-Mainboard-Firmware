@@ -16,7 +16,7 @@
 <body>
     <div class="page">
         <div class="sideBar">
-            <a href="#download">
+            <a href="#temperature">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator selected">
                         <img class="icon" src="temperature.svg">
@@ -24,7 +24,7 @@
                     <div class="label">Temperature</div>
                 </div>
             </a>
-            <a href="#home">
+            <a href="#tds">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator">
                         <img class="icon" src="tds.svg">
@@ -32,7 +32,7 @@
                     <div class="label">TDS</div>
                 </div>
             </a>
-            <a href="#services">
+            <a href="#turbidity">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator">
                         <img class="icon" src="turbidity.svg">
@@ -40,7 +40,7 @@
                     <div class="label">Turbidity</div>
                 </div>
             </a>
-            <a href="#clients">
+            <a href="#pH">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator">
                         <img class="icon" src="pH.svg">
@@ -48,7 +48,7 @@
                     <div class="label">pH</div>
                 </div>
             </a>
-            <a href="#contact">
+            <a href="#download">
                 <div class="item" onclick="select(this)">
                     <div class="activeIndicator">
                         <img class="icon" src="download.svg">
@@ -58,13 +58,62 @@
             </a>
         </div>
         <div class="content">
-            <div class="card">
+            <!-- <div class="card" id="temperature">
                 <div class="chart" id="chart1"></div>
                 <div class="cardContent">
                     <h1>Temperature</h1>
-                    <p>Mesured in degrees celcius, this Sensor uses a K type thermocouple operating at 3.3v</p>
-                    <a href="calibrate" style="text-decoration: none;">
+                    <p>Measured in degrees celcius, this Sensor uses a K type thermocouple operating at 3.3v</p>
+                    <a href="calibrate">
                         <div class="cardButton">Calibrate</div>
+                    </a>
+                </div>
+            </div> -->
+            <div class="card" id="temperature">
+                <div class="chart" id="chartTemperature"></div>
+                <div class="cardContent">
+                    <h1>Temperature</h1>
+                    <p>Measured in degrees celcius, this Sensor uses a K type thermocouple operating at 3.3v</p>
+                    <a href="calibrateTemperature">
+                        <div class="cardButton">Calibrate</div>
+                    </a>
+                </div>
+            </div>
+            <div class="card" id="tds">
+                <div class="chart" id="chartTds"></div>
+                <div class="cardContent">
+                    <h1>Total Disolved Solids</h1>
+                    <p>Measured in ...</p>
+                    <a href="calibrateTds">
+                        <div class="cardButton">Calibrate</div>
+                    </a>
+                </div>
+            </div>
+            <div class="card" id="turbidity">
+                <div class="chart" id="chartTurbidity"></div>
+                <div class="cardContent">
+                    <h1>Turbidity</h1>
+                    <p>Measured in ...</p>
+                    <a href="calibrateTurbidity">
+                        <div class="cardButton">Calibrate</div>
+                    </a>
+                </div>
+            </div>
+            <div class="card" id="pH">
+                <div class="chart" id="chart_pH"></div>
+                <div class="cardContent">
+                    <h1>pH</h1>
+                    <p>Measured in ...</p>
+                    <a href="calibrate_pH">
+                        <div class="cardButton">Calibrate</div>
+                    </a>
+                </div>
+            </div>
+            <div class="card" id="download">
+                <div class="cardContent">
+                    <h1>Download</h1>
+                    <p>You can download a copy of the raw data as a csv file.</p>
+                    <a href="Water Quality Data.csv">
+                        <div class="cardButton">Download</div>
                     </a>
                 </div>
             </div>
@@ -73,13 +122,12 @@
 </body>
 
 <script>
-    var apexChartOptions = {
-        series: [
-            {
-                name: "Temperature",
-                data: []
-            }
-        ],
+    var numberOfDataSeries = 5
+    var defaultChartOptions = {
+        series: [{
+            name: "Default Series Name",
+            data: []
+        }],
         chart: {
             type: 'line',
             height: 350,
@@ -155,21 +203,15 @@
             },
             labels: {
                 style: {
-                    // colors: '#d3e4ff',
                     fontSize: '12px',
-                    // fontFamily: 'Lato, sans-serif',
                     fontWeight: 300,
                 },
             },
         },
-
         yaxis: {
             title: {
-                text: 'Temperature (\xB0C)',
                 style: {
-                    // color: '#d3e4ff',
                     fontSize: '12px',
-                    // fontFamily: 'Lato, sans-serif',
                     fontWeight: 300,
                 },
             },
@@ -191,176 +233,62 @@
         },
     };
 
-    var chart1 = new ApexCharts(document.querySelector("#chart1"), apexChartOptions);
-    // chart.render();
+    var temperatureOptions = Object.assign({}, JSON.parse(JSON.stringify(defaultChartOptions))) // clone the defaults, then overload the specifics
+    temperatureOptions.series[0].name = "Temperature"
+    temperatureOptions.yaxis.title.text = 'Temperature (\xB0C)'
+    temperatureOptions.chart.background = '#0048ff'
+    temperatureOptions.chart.foreColor = '#d3e400'
+    temperatureOptions.color = '#d3e400'
+
+    var tdsOptions = Object.assign({}, JSON.parse(JSON.stringify(defaultChartOptions))) // clone the defaults, then overload the specifics
+    tdsOptions.series[0].name = "TDS"
+    tdsOptions.yaxis.title.text = 'Total Disolved Solids'
+
+    var chartTemperature = new ApexCharts(document.querySelector("#chartTemperature"), temperatureOptions);
+    var chartTds = new ApexCharts(document.querySelector("#chartTds"), tdsOptions);
+    // var chartTurbidity = new ApexCharts(document.querySelector("#chartTurbidity"), apexChartOptions);
+    // var chart_pH = new ApexCharts(document.querySelector("#chart_pH"), apexChartOptions);
 
     window.onload = getData
 
     function getData() {
-        apexChartOptions.series[0].data.push({
-            x: `1`,
-            y: 1
-        })
-        apexChartOptions.series[0].data.push({
-            x: `2`,
-            y: 2
-        })
-        apexChartOptions.series[0].data.push({
-            x: `4`,
-            y: 4
-        })
-        apexChartOptions.series[0].data.push({
-            x: `8`,
-            y: 8
-        })
-        apexChartOptions.series[0].data.push({
-            x: `16`,
-            y: 16
-        })
-
-        chart1.render()
-    }
-
-    function x() {
         var xhttp = new XMLHttpRequest();
         xhttp.onreadystatechange = function () {
             if (this.readyState == 4 && this.status == 200) {
                 var prevDate = ''
                 var lines = this.responseText.split("\n");
                 lines && lines.forEach((line, lineNumber) => {
+                    line = line.replace(/,\s*$/, "") // remove any trailing comma and white space
                     var rowValues = line.split(",")
-                    if (rowValues.length == (numberOfDataSeries + 2)) { // skip incomplete lines
-                        if (lineNumber > 0) { // ignore header row
+                    if (rowValues.length != (numberOfDataSeries + 2)) { // skip incomplete lines
+                        console.log(`Line #${lineNumber} has ${rowValues.length} values, but we were expecting ${numberOfDataSeries + 2}\nLine: ${line}`)
+                    } else {
+                        if (lineNumber == 0) { // ignore header row values, but push null values
+                            temperatureOptions.series[0].data.push({ x: ` `, y: null })
+                            tdsOptions.series[0].data.push({ x: ` `, y: null })
+                        } else {
                             rowValues = rowValues.map(val => val.replace('\r', '')) // clean up \r from any values
-
-                            var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
+                            var dateStr = (rowValues[0] != prevDate) ? rowValues[0] + ' ' : ''
                             prevDate = rowValues[0]
-                            apexChartOptions.series[0].data.push({
-                                x: `${rowValues[0]} ${rowValues[1]}`,
-                                y: rowValues[2]
-                            })
+                            temperatureOptions.series[0].data.push({ x: `${dateStr}${rowValues[1]}`, y: rowValues[5] })
+                            tdsOptions.series[0].data.push({ x: `${dateStr}${rowValues[1]}`, y: rowValues[6] })
 
-                            //charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
+                            //charts.GPSLong.xAxisLabels.push(`${dateStr}${rowValues[1]}`)
                             //charts.GPSLong.values.push(rowValues[3])
                         }
                     }
                 })
-                chart1.render()
+                // push null value at end (x is a non-breaking space)
+                temperatureOptions.series[0].data.push({ x: '\xa0', y: null })
+                tdsOptions.series[0].data.push({ x: '\xa0', y: null })
+
+                chartTemperature.render()
+                chartTds.render()
             }
         };
         xhttp.open("GET", "Water Quality Data.csv", true);
         xhttp.send();
     }
-
-</script>
-
-<script>
-//     var numberOfDataSeries = 5
-//     var apexChartOptions = {
-//         series: [{
-//             name: 'series1',
-//             data: [12, 11, 14, 18, 17, 13, 13]
-//         }],
-//         chart: {
-//             height: 350,
-//             width: '100%',
-//             type: 'area',
-//             toolbar: {
-//                 show: false,
-//             },
-//         },
-//         // colors: ['#5350e9'],
-//         // stroke: {
-//         //     width: 2,
-//         // },
-//         // grid: {
-//         //     show: false,
-//         // },
-//         dataLabels: {
-//             enabled: false
-//         },
-//         // xaxis: {
-//         //     type: 'category',
-//         //     axisBorder: {
-//         //         show: false
-//         //     },
-//         //     axisTicks: {
-//         //         show: false
-//         //     },
-//         //     labels: {
-//         //         show: false,
-//         //     }
-//         // },
-//         // show: false,
-//         // yaxis: {
-//         //     labels: {
-//         //         show: false,
-//         //     },
-//         // },
-//         // tooltip: {
-//         //     x: {
-//         //         show: false
-//         //     },
-//         // },
-//     }
-//     var chart1 = new ApexCharts(document.querySelector("#ChartGPSLat"), apexChartOptions);
-
-//     window.onload = getData()
-
-//     function getData() {
-//         apexChartOptions.series[0].data.push({
-//             x: `1`,
-//             y: 1
-//         })
-//         apexChartOptions.series[0].data.push({
-//             x: `2`,
-//             y: 2
-//         })
-//         apexChartOptions.series[0].data.push({
-//             x: `4`,
-//             y: 4
-//         })
-//         apexChartOptions.series[0].data.push({
-//             x: `8`,
-//             y: 8
-//         })
-//         apexChartOptions.series[0].data.push({
-//             x: `16`,
-//             y: 16
-//         })
-//         chart1.render()
-//     }
-
-//     function x() {
-//         var xhttp = new XMLHttpRequest();
-//         xhttp.onreadystatechange = function () {
-//             if (this.readyState == 4 && this.status == 200) {
-//                 var prevDate = ''
-//                 var lines = this.responseText.split("\n");
-//                 lines && lines.forEach((line, lineNumber) => {
-//                     var rowValues = line.split(",")
-//                     if (rowValues.length == (numberOfDataSeries + 2)) { // skip incomplete lines
-//                         if (lineNumber > 0) { // ignore header row
-//                             rowValues = rowValues.map(val => val.replace('\r', '')) // clean up \r from any values
-
-//                             var dateStr = (rowValues[0] != prevDate) ? rowValues[0] : ''
-//                             prevDate = rowValues[0]
-//                             apexChartOptions.series[0].data.push({
-//                                 x: `${rowValues[0]} ${rowValues[1]}`,
-//                                 y: rowValues[2]
-//                             })
-
-//                             //charts.GPSLong.xAxisLabels.push(`${dateStr} ${rowValues[1]}`)
-//                             //charts.GPSLong.values.push(rowValues[3])
-//                         }
-//                     }
-//                 })
-//                 chart1.render()
-//             }
-//         };
-//         xhttp.open("GET", "Water Quality Data.csv", true);
-//         xhttp.send();
-//     }
 
 </script>
 
