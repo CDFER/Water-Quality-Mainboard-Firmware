@@ -30,7 +30,8 @@ div.debug { /* remove debug to enable */
 .card {
     border-radius: 12px;
     background: #252728;
-    padding: 0px; 
+    padding: 0px;
+    margin-bottom: 24px;
 }
 
 .cardContent {

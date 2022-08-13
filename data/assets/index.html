@@ -3,6 +3,7 @@
 
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kea Water</title>
     <link rel="stylesheet" href="index.css">
     <script src="apexcharts.min.js"></script>
 </head>
@@ -236,9 +237,9 @@
     var temperatureOptions = Object.assign({}, JSON.parse(JSON.stringify(defaultChartOptions))) // clone the defaults, then overload the specifics
     temperatureOptions.series[0].name = "Temperature"
     temperatureOptions.yaxis.title.text = 'Temperature (\xB0C)'
-    temperatureOptions.chart.background = '#0048ff'
-    temperatureOptions.chart.foreColor = '#d3e400'
-    temperatureOptions.color = '#d3e400'
+    // temperatureOptions.chart.background = '#0048ff'
+    // temperatureOptions.chart.foreColor = '#d3e400'
+    // temperatureOptions.color = '#d3e400'
 
     var tdsOptions = Object.assign({}, JSON.parse(JSON.stringify(defaultChartOptions))) // clone the defaults, then overload the specifics
     tdsOptions.series[0].name = "TDS"
@@ -270,11 +271,9 @@
                             rowValues = rowValues.map(val => val.replace('\r', '')) // clean up \r from any values
                             var dateStr = (rowValues[0] != prevDate) ? rowValues[0] + ' ' : ''
                             prevDate = rowValues[0]
+
                             temperatureOptions.series[0].data.push({ x: `${dateStr}${rowValues[1]}`, y: rowValues[5] })
                             tdsOptions.series[0].data.push({ x: `${dateStr}${rowValues[1]}`, y: rowValues[6] })
-
-                            //charts.GPSLong.xAxisLabels.push(`${dateStr}${rowValues[1]}`)
-                            //charts.GPSLong.values.push(rowValues[3])
                         }
                     }
                 })

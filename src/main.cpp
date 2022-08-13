@@ -1,4 +1,6 @@
 #include <Arduino.h>
+
+//Wifi, Webserver and DNS
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include "AsyncTCP.h"
@@ -16,16 +18,46 @@
 #include <driver/adc.h>
 #include <esp_adc_cal.h>
 
+//LED Ring
+#include <Adafruit_NeoPixel.h>
+
+#define LED_PIN 2
+#define NUMPIXELS 24
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMPIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
+unsigned long buttonStart = 0; //Time(millis) when the button was pressed
+bool recording = false; //are we recording right now?
+uint8_t ledIndicatorPos = 0; //how far arround the circle we are right now 0=all off 24=all on
+#define RECORDING_TIME 1.00 //time to record in seconds (needs .00 to force floating point)
+
 char LogFilename[] = "/assets/Water Quality Data.csv";
 
-esp_adc_cal_characteristics_t adc1_chars;
 
+
+//----- Global Sensor Settings -----
+esp_adc_cal_characteristics_t adc1_chars;
 #define ALPHA_SMOOTHING 1
 #define ALPHA_SMOOTHING_DIVISOR 100
-#define TEMP_PIN ADC1_CHANNEL_0
-uint16_t tempValue = 0xFFFF;
-#define TDS_PIN ADC1_CHANNEL_1
+
+#define TDS_PIN ADC1_CHANNEL_0
 uint16_t tdsValue = 0xFFFF;
+
+#define PH_PIN ADC1_CHANNEL_3
+uint16_t phValue = 0xFFFF;
+
+#define PH_TEMP_PIN ADC1_CHANNEL_6
+uint16_t phTempValue = 0xFFFF;
+
+#define WATER_TEMP_PIN ADC1_CHANNEL_7
+uint16_t waterTempValue = 0xFFFF;
+#define THERMISTORNOMINAL 10000 // killo ohms value resistance at 25 degrees C     
+#define BCOEFFICIENT 3950 // The beta coefficient of the thermistor (usually 3000-4000)
+#define SERIESRESISTOR 9980 // killo ohms value of the 'other' resistor
+//Cubic Regression y=a+bx+cx^2+dx^3
+float waterTempa = -19.2;
+float waterTempb = 1.35;
+float waterTempc = 0.00871;
+float waterTempd = -0.000257;
+
 
 HardwareSerial uart(1);
 TinyGPSPlus gps;
@@ -46,19 +78,19 @@ struct Button{
 Button button1 = {0, 0, false}; //PIN, key presses, pressed flag
 
 // variables to keep track of the timing of recent interrupts
-unsigned long button_time = 0;
-unsigned long last_button_time = 0;
+//unsigned long button_time = 0;
+uint32_t last_button_time = 0;
 
 void appendLineToCSV();
 void readADC(adc1_channel_t, uint16_t *);
 void readAllAdcChannels();
+void updateTimerAndLEDS();
 
 void IRAM_ATTR isr(){
-    button_time = millis();
-    if (button_time - last_button_time > 250){
-        button1.numberKeyPresses++;
+    if (millis() - last_button_time > 250 && recording == false){
+        //button1.numberKeyPresses++;
         button1.pressed = true;
-        last_button_time = button_time;
+        last_button_time = millis();
     }
 }
 
@@ -90,90 +122,134 @@ public:
 };
 
 void setup(){
+
+    strip.begin();
+    strip.show(); // Initialize all pixels to 'off'
+    strip.setBrightness(255);
+    
+
     Serial.begin(115200);
     Serial.println("Serial Begin");
 
     // Initialize SPIFFS (ESP32 SPI Flash Storage)
-    if (!SPIFFS.begin(true))
-    {
+    if (!SPIFFS.begin(true)){
         Serial.println("An Error has occurred while mounting SPIFFS");
+        strip.fill(strip.Color(255, 0, 0)); //RED LEDS
         return;
     }
 
-    WiFi.disconnect();   // added to start with the wifi off, avoid crashing
+    // Wifi Setup ===========================================================
+    WiFi.disconnect();
     WiFi.mode(WIFI_OFF); // added to start with the wifi off, avoid crashing
     WiFi.mode(WIFI_AP);
     WiFi.softAP(ssid, password, 4, 0, 8);
 
+    
+    // ANDROID 10 WIFI WORKAROUND============================================
     delay(500); // seems like this delay is quite important or not...?
-    // ANDROID 10 WORKAROUND==================================================
-    // set new WiFi configurations
-    WiFi.disconnect();
-    /*Stop wifi to change config parameters*/
-    esp_wifi_stop();   // stop WIFI
-    esp_wifi_deinit(); //"De init"
+    WiFi.disconnect(); //Stop wifi to change config parameters
+    esp_wifi_stop();
+    esp_wifi_deinit();
     /*Disabling AMPDU RX is necessary for Android 10 support*/
-    wifi_init_config_t my_config = WIFI_INIT_CONFIG_DEFAULT(); // We use the default config ...
-    my_config.ampdu_rx_enable = 0;                             //... and modify only what we want.
-    esp_wifi_init(&my_config);                                 // set the new config = "Disable AMPDU"
-    esp_wifi_start();                                          // Restart WiFi
+    wifi_init_config_t my_config = WIFI_INIT_CONFIG_DEFAULT();
+    my_config.ampdu_rx_enable = 0;                             
+    esp_wifi_init(&my_config);                                
+    esp_wifi_start();
     delay(500);
-    // ANDROID 10 WORKAROUND==================================================
-
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
 
-    // if DNSServer is started with "*" for domain name, it will reply with
-    // provided IP to all DNS request
-    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+    // DNS Server Setup ===========================================================
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);// if DNSServer is started with "*" (catchall) for domain name
     dnsServer.start(DNS_PORT, "*", apIP);
 
-    server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER); // only when requested from AP
+    // Webserver Setup ===========================================================
+    server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER); //setup above function to run when requested from device
     server.begin();
 
     // Setup GPIO ==================================================
     pinMode(button1.PIN, INPUT_PULLUP);
     attachInterrupt(button1.PIN, isr, FALLING);
-    
-    adc1_config_channel_atten(TEMP_PIN,ADC_ATTEN_DB_11);
-    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 0, &adc1_chars);
-    adc1_config_width(ADC_WIDTH_BIT_12);
 
-    //Check Vref is burned into eFuse
     if (esp_adc_cal_check_efuse(ESP_ADC_CAL_VAL_EFUSE_VREF) == ESP_OK) {
         //printf("eFuse Vref: Supported\n");
     } else {
         printf("ADC Vref Factory Setting: NOT Found\n");
+        strip.fill(strip.Color(0, 255, 0)); //GREEN LEDS
     }
+    
+    adc1_config_channel_atten(WATER_TEMP_PIN,ADC_ATTEN_DB_11);
+    adc1_config_channel_atten(PH_TEMP_PIN,ADC_ATTEN_DB_11);
+    adc1_config_channel_atten(PH_PIN,ADC_ATTEN_DB_11);
+    adc1_config_channel_atten(TDS_PIN,ADC_ATTEN_DB_11);
 
-    // GPS Module Setup stuff
+    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 0, &adc1_chars);
+    adc1_config_width(ADC_WIDTH_BIT_12);
+
+
+    // GPS Module serial comms setup
     uart.begin(9600, SERIAL_8N1, 17, 16);
+
+    strip.show();
 }
 
 void loop(){
     dnsServer.processNextRequest();
 
     while (uart.available() > 0){
-        // get the byte data from the GPS
-        gps.encode(uart.read());
+        gps.encode(uart.read());    // get the byte data from the GPS
     }
 
-    readAllAdcChannels();    
+    // //-----PH Conversion-----
+    float phVolt=phValue*3.300/4095.0/6;
+    float ph_act = -5.70 *phVolt + (20.24 - 0.7);
+
+    Serial.print("phValue = ");
+    Serial.print(phValue);
+    Serial.print("/4095, ");
+
+    Serial.print("phOutput = ");
+    Serial.print(ph_act);
+    Serial.println(" , ");
+
+
+    readAllAdcChannels();
+    updateTimerAndLEDS();
 
     if (button1.pressed){
-
-        Serial.print(tempValue);
-        Serial.print("mV, ");
-        Serial.print(tdsValue);
-        Serial.print("mV\n");
-
-        appendLineToCSV();
+        recording = true;
         button1.pressed = false;
     }
 }
 
+void updateTimerAndLEDS(){
+    if (recording==true){
+        if (((millis()-last_button_time)/((RECORDING_TIME/NUMPIXELS)*1000))+1 >= ledIndicatorPos){
+            if (ledIndicatorPos <=NUMPIXELS){
+                uint8_t i;
+                for(i=0; i< ledIndicatorPos; i++) {
+                strip.setPixelColor(i,strip.gamma32(strip.ColorHSV(i*(65535/NUMPIXELS))));
+                }
+                strip.show();
+                ledIndicatorPos++;
+
+            } else {
+                appendLineToCSV();
+                recording = false;
+                ledIndicatorPos = 0;
+                strip.clear();
+                strip.show();
+            }
+        }
+    } 
+}
+
+
+
 void readAllAdcChannels(){
-    readADC(TEMP_PIN, &tempValue);
+    readADC(WATER_TEMP_PIN, &waterTempValue);
     readADC(TDS_PIN, &tdsValue);
+    readADC(PH_PIN, &phValue);
+    readADC(PH_TEMP_PIN, &phTempValue);
 }
 
 void readADC(adc1_channel_t channel, uint16_t *value){
@@ -201,7 +277,7 @@ void appendLineToCSV(){
 
     //UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Temp(ADC mV),TDS(ADC mV),
     if (!gps.date.isValid()){
-        Serial.print(F("****-**-**,"));
+        CSV.print(F("****-**-**,"));
     }else{
         char sz[32];
         sprintf(sz, "%02d-%02d-%02d,", gps.date.year(), gps.date.month(), gps.date.day());
@@ -232,10 +308,57 @@ void appendLineToCSV(){
         CSV.print(F(","));
     }
 
-    CSV.print(tempValue,0);//0dp, normally 4 digits
-    CSV.print(F(","));
-    CSV.print(tdsValue,0);//0dp, normally 4 digits
-    CSV.print(F(","));
+    //-----Temperature Conversion-----    
+    float resistance = 4095.00 / waterTempValue -1;
+    resistance = SERIESRESISTOR / resistance;
+    float steinhart = resistance / THERMISTORNOMINAL;     // (R/Ro)
+    steinhart = log(steinhart);                  // ln(R/Ro)
+    steinhart /= BCOEFFICIENT;                   // 1/B * ln(R/Ro)
+    steinhart += 1.0 / (25 + 273.15);            // + (1/To)
+    steinhart = 1.0 / steinhart;                 // Invert
+    steinhart -= 273.15;                         // convert absolute temp to C
+    //Cubic Regression y=a+bx+cx^2+dx^3
+    float waterTempOutput = waterTempa + waterTempb * (steinhart) + waterTempc * pow(steinhart,2) + waterTempd * pow(steinhart,3);
+
+    Serial.print("Water Temperature ");
+    Serial.print(waterTempOutput,3);
+    Serial.print(" *C     ");
+
+
+    //-----TDS Conversion-----
+    // read the analog value more stable by the median filtering algorithm, and convert to voltage value
+    float TDSVoltage = tdsValue * (3.3000 / 4095.0);
+    //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
+    float TDScompensationCoefficient = 1.0+0.02*(waterTempOutput-25.0);
+    //temperature compensation
+    float TDScompensatedVoltage=TDSVoltage/TDScompensationCoefficient;
+    //convert voltage value to tds value
+    float tdsOutput=(133.42*pow(TDScompensatedVoltage,3) - 255.86*pow(TDScompensatedVoltage,2) + 857.39*TDScompensatedVoltage)*0.5;
+    
+    Serial.print("tdsValue = ");
+    Serial.print(tdsValue);
+    Serial.print("/4095, ");
+
+    Serial.print("tdsOutput = ");
+    Serial.print(tdsOutput,0);
+    Serial.println("ppm");
+
+
+    //-----PH Conversion-----
+    float pHVol = (float)phValue * 5.0 / 1024 / 6;
+    float phOutput = -5.70 * pHVol + 21.34;
+
+    Serial.print("phValue = ");
+    Serial.print(phValue);
+    Serial.print("/4095, ");
+
+    Serial.print("phOutput = ");
+    Serial.print(phOutput);
+    Serial.print(" , ");
+
+    Serial.print("phTempValue = ");
+    Serial.print(phTempValue);
+    Serial.println("/4095, ");
 
     CSV.close();
 }
