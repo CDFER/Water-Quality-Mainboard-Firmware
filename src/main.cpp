@@ -21,13 +21,16 @@
 //LED Ring
 #include <Adafruit_NeoPixel.h>
 
-#define LED_PIN 2
-#define NUMPIXELS 24
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMPIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+#define LED_PIN 13
+#define NUMPIXELS 26
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMPIXELS, LED_PIN, NEO_GRBW + NEO_KHZ800);
 unsigned long buttonStart = 0; //Time(millis) when the button was pressed
+unsigned long lastFrame = 0; //Time(millis) when the frame of the leds was displayed
 bool recording = false; //are we recording right now?
-uint8_t ledIndicatorPos = 0; //how far arround the circle we are right now 0=all off 24=all on
-#define RECORDING_TIME 1.00 //time to record in seconds (needs .00 to force floating point)
+bool waterPresent = false; //are we in Water right now?
+uint16_t ledIndicatorPos = 0; //how far arround the circle we are right now 0=all off 24*255=all on
+#define RECORDING_TIME 30.00 //time to record in seconds (needs .00 to force floating point)
 
 char LogFilename[] = "/assets/Water Quality Data.csv";
 
@@ -38,25 +41,30 @@ esp_adc_cal_characteristics_t adc1_chars;
 #define ALPHA_SMOOTHING 1
 #define ALPHA_SMOOTHING_DIVISOR 100
 
-#define TDS_PIN ADC1_CHANNEL_0
+#define TDS_PIN ADC1_CHANNEL_5
 uint16_t tdsValue = 0xFFFF;
+// Regression Calibration of pH y=a+bx+cx^2
+float tdsa = -54;
+float tdsb = 0.368;
+float tdsc = 0.0000666;
 
 #define PH_PIN ADC1_CHANNEL_3
 uint16_t phValue = 0xFFFF;
-
-#define PH_TEMP_PIN ADC1_CHANNEL_6
-uint16_t phTempValue = 0xFFFF;
+// Regression Calibration of pH y=a+bx+cx^2
+float pha = 32.8;
+float phb = -0.0151;
+float phc = 0.00000142;
+// Regression Calibration of pH vs Temp y=a+bx
+float phta = -0.713;
+float phtb = 0.000293;
 
 #define WATER_TEMP_PIN ADC1_CHANNEL_7
 uint16_t waterTempValue = 0xFFFF;
-#define THERMISTORNOMINAL 10000 // killo ohms value resistance at 25 degrees C     
-#define BCOEFFICIENT 3950 // The beta coefficient of the thermistor (usually 3000-4000)
-#define SERIESRESISTOR 9980 // killo ohms value of the 'other' resistor
-//Cubic Regression y=a+bx+cx^2+dx^3
-float waterTempa = -19.2;
-float waterTempb = 1.35;
-float waterTempc = 0.00871;
-float waterTempd = -0.000257;
+//Cubic Regression Calibration y=a+bx+cx^2+dx^3
+float waterTempa = -48.3;
+float waterTempb = 0.0893;
+float waterTempc = -0.00004;
+float waterTempd = 0.00000000795;
 
 
 HardwareSerial uart(1);
@@ -126,10 +134,14 @@ void setup(){
     strip.begin();
     strip.show(); // Initialize all pixels to 'off'
     strip.setBrightness(255);
+    strip.fill(strip.Color(255, 255, 255)); //White LEDS
+    strip.show();
     
 
     Serial.begin(115200);
-    Serial.println("Serial Begin");
+    Serial.println("");
+    Serial.println("Kea Water 001");
+    Serial.print("UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM), pH (0-14)");
 
     // Initialize SPIFFS (ESP32 SPI Flash Storage)
     if (!SPIFFS.begin(true)){
@@ -167,6 +179,25 @@ void setup(){
     server.begin();
 
     // Setup GPIO ==================================================
+    pinMode(19, OUTPUT);
+    pinMode(2, OUTPUT);
+    pinMode(25, OUTPUT);
+    pinMode(26, OUTPUT);
+    pinMode(27, OUTPUT);
+
+
+    digitalWrite(19, HIGH);
+    delay(1000);
+    digitalWrite(2, HIGH);
+    delay(1000);
+    digitalWrite(25, HIGH);
+    delay(1000);
+    digitalWrite(26, HIGH);
+    delay(1000);
+    digitalWrite(27, HIGH);
+    delay(1000);
+
+
     pinMode(button1.PIN, INPUT_PULLUP);
     attachInterrupt(button1.PIN, isr, FALLING);
 
@@ -178,7 +209,6 @@ void setup(){
     }
     
     adc1_config_channel_atten(WATER_TEMP_PIN,ADC_ATTEN_DB_11);
-    adc1_config_channel_atten(PH_TEMP_PIN,ADC_ATTEN_DB_11);
     adc1_config_channel_atten(PH_PIN,ADC_ATTEN_DB_11);
     adc1_config_channel_atten(TDS_PIN,ADC_ATTEN_DB_11);
 
@@ -187,60 +217,81 @@ void setup(){
 
 
     // GPS Module serial comms setup
-    uart.begin(9600, SERIAL_8N1, 17, 16);
+    uart.begin(9600, SERIAL_8N1, 16, 17);
 
-    strip.show();
+    for (uint8_t i = 0; i < ALPHA_SMOOTHING_DIVISOR; i++){
+        readAllAdcChannels();
+    }
+
+    
+    
+
 }
 
 void loop(){
+    readAllAdcChannels();
+
     dnsServer.processNextRequest();
 
     while (uart.available() > 0){
         gps.encode(uart.read());    // get the byte data from the GPS
     }
 
-    // //-----PH Conversion-----
-    float phVolt=phValue*3.300/4095.0/6;
-    float ph_act = -5.70 *phVolt + (20.24 - 0.7);
+    if (recording==false){
+        if (gps.location.isValid()){
+            strip.fill(strip.Color(0, 255, 0)); //Green LEDS
+            strip.show();
+        }
 
-    Serial.print("phValue = ");
-    Serial.print(phValue);
-    Serial.print("/4095, ");
+        if (tdsValue > 250){
+            waterPresent = true;
+            isr();
+        }
 
-    Serial.print("phOutput = ");
-    Serial.print(ph_act);
-    Serial.println(" , ");
-
-
-    readAllAdcChannels();
-    updateTimerAndLEDS();
-
-    if (button1.pressed){
-        recording = true;
-        button1.pressed = false;
+        if (button1.pressed){ 
+            strip.clear();
+            strip.show();
+            recording = true;
+            button1.pressed = false;
+        }
+        
+    }else{
+        updateTimerAndLEDS();
     }
+   
 }
 
 void updateTimerAndLEDS(){
-    if (recording==true){
-        if (((millis()-last_button_time)/((RECORDING_TIME/NUMPIXELS)*1000))+1 >= ledIndicatorPos){
-            if (ledIndicatorPos <=NUMPIXELS){
-                uint8_t i;
-                for(i=0; i< ledIndicatorPos; i++) {
-                strip.setPixelColor(i,strip.gamma32(strip.ColorHSV(i*(65535/NUMPIXELS))));
+    if (recording==true && millis() > lastFrame + 20){
+        ledIndicatorPos = (millis()-last_button_time)*((NUMPIXELS*255)/(RECORDING_TIME*1000));
+        if (ledIndicatorPos<(NUMPIXELS*255)){
+            u_int16_t i = ledIndicatorPos;
+            u_int8_t pixel = 0;
+            while (i != 0){
+                if (i > 255){
+                    //strip.setPixelColor(pixel,strip.gamma32(strip.ColorHSV(pixel*(65535/NUMPIXELS),255,255)));
+                    i = i - 255;
+                    pixel++;
+                }else{
+                    strip.setPixelColor(pixel,strip.gamma32(strip.ColorHSV(pixel*(65535/NUMPIXELS),255,i)));
+                    i = 0;
+                    strip.show();
                 }
-                strip.show();
-                ledIndicatorPos++;
-
-            } else {
-                appendLineToCSV();
-                recording = false;
-                ledIndicatorPos = 0;
-                strip.clear();
-                strip.show();
+                
             }
+            lastFrame = millis();
+        } else {  
+            appendLineToCSV();
+            recording = false;
+            strip.clear();
+            strip.show();
+            lastFrame = 0;       
+            //esp_sleep_enable_timer_wakeup(60* 1000000);//1hrs
+            esp_deep_sleep_start();
+
         }
-    } 
+    }
+
 }
 
 
@@ -249,7 +300,7 @@ void readAllAdcChannels(){
     readADC(WATER_TEMP_PIN, &waterTempValue);
     readADC(TDS_PIN, &tdsValue);
     readADC(PH_PIN, &phValue);
-    readADC(PH_TEMP_PIN, &phTempValue);
+    //readADC(PH_TEMP_PIN, &phTempValue);
 }
 
 void readADC(adc1_channel_t channel, uint16_t *value){
@@ -274,91 +325,106 @@ void appendLineToCSV(){
     }
 
     CSV.print("\n");
+    Serial.print("\n");
 
-    //UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Temp(ADC mV),TDS(ADC mV),
+    //UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM), pH (0-14)
     if (!gps.date.isValid()){
         CSV.print(F("****-**-**,"));
+        Serial.print(F("****-**-**,"));
     }else{
         char sz[32];
         sprintf(sz, "%02d-%02d-%02d,", gps.date.year(), gps.date.month(), gps.date.day());
         CSV.print(sz);
+        Serial.print(sz);
     }
-    
+
+    //-----Time from GPS-----
     if (!gps.time.isValid()){
         CSV.print(F("**:**:**,"));
+        Serial.print(F("**:**:**,"));
     }else{
         char sz[32];
         sprintf(sz, "%02d:%02d:%02d,", gps.time.hour(), gps.time.minute(), gps.time.second());
         CSV.print(sz);
+        Serial.print(sz);
     }
 
+    //-----Lat and Long from GPS-----
     if (!gps.location.isValid()){
         CSV.print(F("***.******,***.******,"));
+        Serial.print(F("***.******,***.******,"));
+
     }else{
         CSV.print(gps.location.lat(),6);//6dp
         CSV.print(F(","));
         CSV.print(gps.location.lng(),6);
         CSV.print(F(","));
+        Serial.print(gps.location.lat(),6);//6dp
+        Serial.print(F(","));
+        Serial.print(gps.location.lng(),6);
+        Serial.print(F(","));
     }
 
+    //-----Altitude from GPS-----
     if (!gps.altitude.isValid()){
         CSV.print(F("***,"));
+        Serial.print(F("***,"));
     }else{
         CSV.print(gps.altitude.meters(),0);//0dp
         CSV.print(F(","));
+        Serial.print(gps.altitude.meters(),0);//0dp
+        Serial.print(F(","));
     }
 
-    //-----Temperature Conversion-----    
-    float resistance = 4095.00 / waterTempValue -1;
-    resistance = SERIESRESISTOR / resistance;
-    float steinhart = resistance / THERMISTORNOMINAL;     // (R/Ro)
-    steinhart = log(steinhart);                  // ln(R/Ro)
-    steinhart /= BCOEFFICIENT;                   // 1/B * ln(R/Ro)
-    steinhart += 1.0 / (25 + 273.15);            // + (1/To)
-    steinhart = 1.0 / steinhart;                 // Invert
-    steinhart -= 273.15;                         // convert absolute temp to C
-    //Cubic Regression y=a+bx+cx^2+dx^3
-    float waterTempOutput = waterTempa + waterTempb * (steinhart) + waterTempc * pow(steinhart,2) + waterTempd * pow(steinhart,3);
-
-    Serial.print("Water Temperature ");
-    Serial.print(waterTempOutput,3);
-    Serial.print(" *C     ");
 
 
-    //-----TDS Conversion-----
-    // read the analog value more stable by the median filtering algorithm, and convert to voltage value
-    float TDSVoltage = tdsValue * (3.3000 / 4095.0);
-    //temperature compensation formula: fFinalResult(25^C) = fFinalResult(current)/(1.0+0.02*(fTP-25.0)); 
-    float TDScompensationCoefficient = 1.0+0.02*(waterTempOutput-25.0);
-    //temperature compensation
-    float TDScompensatedVoltage=TDSVoltage/TDScompensationCoefficient;
-    //convert voltage value to tds value
-    float tdsOutput=(133.42*pow(TDScompensatedVoltage,3) - 255.86*pow(TDScompensatedVoltage,2) + 857.39*TDScompensatedVoltage)*0.5;
-    
-    Serial.print("tdsValue = ");
-    Serial.print(tdsValue);
-    Serial.print("/4095, ");
-
-    Serial.print("tdsOutput = ");
-    Serial.print(tdsOutput,0);
-    Serial.println("ppm");
+    //-----Water Temperature Conversion from Raw to *C -----
+    if (waterTempValue<=0){//142 is a disconnected sensor
+        CSV.print(F("***,"));
+        Serial.print(F("***,"));
+    }else{
+        //Cubic Regression Calibration y=a+bx+cx^2+dx^3
+        float waterTempOutput = waterTempa + waterTempb * (waterTempValue) + waterTempc * pow(waterTempValue,2) + waterTempd * pow(waterTempValue,3);
+        CSV.print(waterTempOutput);
+        CSV.print(",");
+        Serial.print(waterTempOutput);
+        Serial.print(",");
+        
+    }
+    //------------------------------------------------------
 
 
-    //-----PH Conversion-----
-    float pHVol = (float)phValue * 5.0 / 1024 / 6;
-    float phOutput = -5.70 * pHVol + 21.34;
+    //-----TDS Conversion from Raw to PPM -----
+    if (tdsValue<=142){//141 is a disconnected sensor
+        CSV.print(F("0,"));
+        Serial.print(F("0,"));
+    }else{
+        //Cubic Regression Calibration y=a+bx+cx^2+dx^3
+        float tdsOutput = tdsa + tdsb * (tdsValue) + tdsc * pow(tdsValue,2);
+        CSV.print(tdsOutput);
+        CSV.print(",");
+        Serial.print(tdsOutput);
+        Serial.print(",");
+    }
+    //------------------------------------------------------
 
-    Serial.print("phValue = ");
-    Serial.print(phValue);
-    Serial.print("/4095, ");
 
-    Serial.print("phOutput = ");
-    Serial.print(phOutput);
-    Serial.print(" , ");
+    //-----pH Conversion from Raw to 0-14 -----
+    if (phValue<=142){//142 is a disconnected sensor
+        CSV.print(F("***,"));
+        //Serial.print(F("***,"));
+    }else{
+        //Regression Calibration y=a+bx+cx^2
+        float phNoTempCal = pha + phb * (phValue) + phc * pow(phValue,2);
+        //Regression Calibration y=a+bx
+        float phOutput = phNoTempCal + phta + phtb * (waterTempValue);
+        CSV.print(phOutput);
+        CSV.print(",");
+        Serial.print(phOutput);
+        Serial.print(",");
+    }
+    //------------------------------------------------------
 
-    Serial.print("phTempValue = ");
-    Serial.print(phTempValue);
-    Serial.println("/4095, ");
 
     CSV.close();
 }

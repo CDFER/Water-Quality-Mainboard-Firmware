@@ -73,48 +73,39 @@
                 <div class="chart" id="chartTemperature"></div>
                 <div class="cardContent">
                     <h1>Temperature</h1>
-                    <p>Measured in degrees celcius, this Sensor uses a K type thermocouple operating at 3.3v</p>
-                    <a href="calibrateTemperature">
-                        <div class="cardButton">Calibrate</div>
-                    </a>
+                    <p>Measured in degrees celcius, this Sensor uses a thermistor operating at 3.3v</p>
                 </div>
             </div>
             <div class="card" id="tds">
                 <div class="chart" id="chartTds"></div>
                 <div class="cardContent">
                     <h1>Total Disolved Solids</h1>
-                    <p>Measured in ...</p>
-                    <a href="calibrateTds">
-                        <div class="cardButton">Calibrate</div>
-                    </a>
+                    <p>Measured as the conductivity of the water, this is converted to parts per million (ppm) of disolved solids in the water using the standard 442 TDS solution.</p>
                 </div>
             </div>
             <div class="card" id="turbidity">
                 <div class="chart" id="chartTurbidity"></div>
                 <div class="cardContent">
                     <h1>Turbidity</h1>
-                    <p>Measured in ...</p>
-                    <a href="calibrateTurbidity">
-                        <div class="cardButton">Calibrate</div>
-                    </a>
+                    <p>Coming Soon...</p>
                 </div>
             </div>
             <div class="card" id="pH">
                 <div class="chart" id="chart_pH"></div>
                 <div class="cardContent">
                     <h1>pH</h1>
-                    <p>Measured in ...</p>
-                    <a href="calibrate_pH">
-                        <div class="cardButton">Calibrate</div>
-                    </a>
+                    <p>Measured on The pH scale using a pH probe. Make sure to calibrate the sensor once every 12 months at least and replace the sensor every 3-5 years.</p>
                 </div>
             </div>
             <div class="card" id="download">
                 <div class="cardContent">
                     <h1>Download</h1>
-                    <p>You can download a copy of the raw data as a csv file.</p>
+                    <p>You can download a copy of the data as a csv file.</p>
                     <a href="Water Quality Data.csv">
-                        <div class="cardButton">Download</div>
+                        <div class="cardButton">View Data</div>
+                    </a>
+                    <a href="Water Quality Data.csv" download="Water Quality Data.csv">
+                        <div class="cardButton">Download Data</div>
                     </a>
                 </div>
             </div>
@@ -123,7 +114,7 @@
 </body>
 
 <script>
-    var numberOfDataSeries = 5
+    var numberOfDataSeries = 6
     var defaultChartOptions = {
         series: [{
             name: "Default Series Name",
@@ -243,12 +234,16 @@
 
     var tdsOptions = Object.assign({}, JSON.parse(JSON.stringify(defaultChartOptions))) // clone the defaults, then overload the specifics
     tdsOptions.series[0].name = "TDS"
-    tdsOptions.yaxis.title.text = 'Total Disolved Solids'
+    tdsOptions.yaxis.title.text = 'Total Disolved Solids (PPM)'
+
+    var phOptions = Object.assign({}, JSON.parse(JSON.stringify(defaultChartOptions))) // clone the defaults, then overload the specifics
+    phOptions.series[0].name = "pH"
+    phOptions.yaxis.title.text = 'pH Level (0-14)'
 
     var chartTemperature = new ApexCharts(document.querySelector("#chartTemperature"), temperatureOptions);
     var chartTds = new ApexCharts(document.querySelector("#chartTds"), tdsOptions);
     // var chartTurbidity = new ApexCharts(document.querySelector("#chartTurbidity"), apexChartOptions);
-    // var chart_pH = new ApexCharts(document.querySelector("#chart_pH"), apexChartOptions);
+    var chart_pH = new ApexCharts(document.querySelector("#chart_pH"), phOptions);
 
     window.onload = getData
 
@@ -267,6 +262,7 @@
                         if (lineNumber == 0) { // ignore header row values, but push null values
                             temperatureOptions.series[0].data.push({ x: ` `, y: null })
                             tdsOptions.series[0].data.push({ x: ` `, y: null })
+                            phOptions.series[0].data.push({ x: ` `, y: null })
                         } else {
                             rowValues = rowValues.map(val => val.replace('\r', '')) // clean up \r from any values
                             var dateStr = (rowValues[0] != prevDate) ? rowValues[0] + ' ' : ''
@@ -274,15 +270,18 @@
 
                             temperatureOptions.series[0].data.push({ x: `${dateStr}${rowValues[1]}`, y: rowValues[5] })
                             tdsOptions.series[0].data.push({ x: `${dateStr}${rowValues[1]}`, y: rowValues[6] })
+                            phOptions.series[0].data.push({ x: `${dateStr}${rowValues[1]}`, y: rowValues[7] })
                         }
                     }
                 })
                 // push null value at end (x is a non-breaking space)
                 temperatureOptions.series[0].data.push({ x: '\xa0', y: null })
                 tdsOptions.series[0].data.push({ x: '\xa0', y: null })
+                phOptions.series[0].data.push({ x: '\xa0', y: null })
 
                 chartTemperature.render()
                 chartTds.render()
+                chart_pH.render()
             }
         };
         xhttp.open("GET", "Water Quality Data.csv", true);
