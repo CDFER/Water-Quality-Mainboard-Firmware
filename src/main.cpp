@@ -28,19 +28,14 @@ struct Button{
 
 
 
-// Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMPIXELS, LED_PIN, NEO_GRBW + NEO_KHZ800);
-// unsigned long buttonStart = 0; //Time(millis) when the button was pressed
-// unsigned long lastFrame = 0; //Time(millis) when the frame of the leds was displayed
-// bool recording = false; //are we recording right now?
-// bool waterPresent = false; //are we in Water right now?
-// uint16_t ledIndicatorPos = 0; //how far arround the circle we are right now 0=all off 24*255=all on
-// #define RECORDING_TIME 30.00 //time to record in seconds (needs .00 to force floating point)
-
-
 const char *ssid = "Piharau II 001";
 const char *password = "W7AvrwJJWg83e2";
 
 char LogFilename[] = "/assets/Water Quality Data.csv";
+
+#define FRAMETIME 1000/50 //frametime in ms
+
+#define RECORDING_TIME 3000 //time to record in milliseconds
 
 #define GPSTX_PIN 17
 #define GPSRX_PIN 16
@@ -57,11 +52,11 @@ char LogFilename[] = "/assets/Water Quality Data.csv";
 #define GREEN_LED_PIN 27
 
 #define ARGB1_PIN 13
-#define ARGB1_PIXELS 1
+#define ARGB1_PIXELS 15
 Adafruit_NeoPixel ARGB1 = Adafruit_NeoPixel(ARGB1_PIXELS, ARGB1_PIN, NEO_GRBW + NEO_KHZ800);
 
 #define ARGB2_TURBIDITY_PIN 23
-#define ARGB2_TURBIDITY_PIXELS 1
+#define ARGB2_TURBIDITY_PIXELS 2
 Adafruit_NeoPixel ARGB2 = Adafruit_NeoPixel(ARGB2_TURBIDITY_PIXELS, ARGB2_TURBIDITY_PIN, NEO_GRBW + NEO_KHZ800);
 
 #define SENSOR_POWER 19
@@ -70,7 +65,6 @@ Adafruit_NeoPixel ARGB2 = Adafruit_NeoPixel(ARGB2_TURBIDITY_PIXELS, ARGB2_TURBID
 
 
 struct Button IO0Button = {0, false}; //PIN, pressed flag
-
 
 
 //----- Global Analog Settings -----
@@ -85,7 +79,6 @@ float tdsa = -54;
 float tdsb = 0.368;
 float tdsc = 0.0000666;
 
-
 uint16_t phValue = 0xFFFF;
 // Regression Calibration of pH y=a+bx+cx^2
 float pha = 32.8;
@@ -95,21 +88,12 @@ float phc = 0.00000142;
 float phta = -0.713;
 float phtb = 0.000293;
 
-
 uint16_t nitrateValue = 0xFFFF;
 //Cubic Regression Calibration y=a+bx+cx^2+dx^3
 float nitratea = 0;
 float nitrateb = 0;
 float nitratec = 0;
 float nitrated = 0;
-
-// #define WATER_TEMP_PIN ADC1_CHANNEL_7
-// uint16_t waterTempValue = 0xFFFF;
-// //Cubic Regression Calibration y=a+bx+cx^2+dx^3
-// float waterTempa = -48.3;
-// float waterTempb = 0.0893;
-// float waterTempc = -0.00004;
-// float waterTempd = 0.00000000795;
 
 
 HardwareSerial uart(1);
@@ -120,13 +104,15 @@ IPAddress apIP(4, 3, 2, 1);
 DNSServer dnsServer;
 AsyncWebServer server(80);
 
-// variables to keep track of the timing of recent interrupts
-//uint32_t last_button_time = 0;
+
+//State Machine
+enum {STARTUP, FIND_GPS, PRE_IDLE, IDLE, PRE_RECORDING, RECORDING, CHARGING};
+uint8_t state = STARTUP;
+
 
 void appendLineToCSV();
 void readADC(adc1_channel_t, uint16_t *);
 void readAllAdcChannels();
-void updateTimerAndLEDS();
 void wifiSetup();
 void IRAM_ATTR isr();
 
@@ -160,12 +146,33 @@ public:
 
 void setup(){
 
+    // Setup ARGB LEDs ==================================================
+    pinMode(LED_POWER, OUTPUT);
+    digitalWrite(LED_POWER, LOW);
+
+    ARGB2.begin();
+    ARGB2.setBrightness(255);
+    ARGB2.fill(ARGB2.Color(0, 0, 0, 0));
+    
+    ARGB1.begin();
+    ARGB1.setBrightness(255);
+    ARGB1.fill(ARGB1.Color(0, 0, 0, 0));
+
+    digitalWrite(LED_POWER, HIGH);
+    ARGB1.show();
+    ARGB2.show();
+
+    // Startup GPS ==================================================
+    pinMode(GPS_POWER, OUTPUT);
+    digitalWrite(GPS_POWER, HIGH);
+
+
     // Setup Serial to PC  ==================================================
     Serial.begin(115200);
     Serial.println("");
     Serial.println(ssid);
     Serial.println(password);
-    Serial.print("UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM), pH (0-14)");
+    Serial.println("UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM), pH (0-14)");
 
 
     // Setup GPIO ==================================================
@@ -174,24 +181,10 @@ void setup(){
     pinMode(GREEN_LED_PIN, OUTPUT);
 
     pinMode(SENSOR_POWER, OUTPUT);
-    pinMode(GPS_POWER, OUTPUT);
-    pinMode(LED_POWER, OUTPUT);
-
-    pinMode(IO0Button.PIN, INPUT_PULLUP);
-
-    attachInterrupt(IO0Button.PIN, isr, FALLING);
-
-    ARGB1.begin();
-    ARGB1.show(); // Initialize all pixels to 'off'
-    ARGB2.begin();
-    ARGB2.show(); // Initialize all pixels to 'off'
-
     digitalWrite(SENSOR_POWER, HIGH);
-    digitalWrite(GREEN_LED_PIN, HIGH);
-    digitalWrite(GPS_POWER, HIGH);
-    digitalWrite(LED_POWER, HIGH);
-    digitalWrite(GREEN_LED_PIN, LOW);
-
+    
+    pinMode(IO0Button.PIN, INPUT);
+    attachInterrupt(IO0Button.PIN, isr, FALLING);
 
 
     // Setup Analog Input ==================================================
@@ -200,6 +193,7 @@ void setup(){
     } else {
         Serial.println("ADC Vref Factory Setting: NOT Found");
         digitalWrite(RED_LED_PIN, HIGH);
+        ESP.restart();
     }
     
     //adc1_config_channel_atten(WATER_TEMP_PIN,ADC_ATTEN_DB_11);
@@ -214,92 +208,95 @@ void setup(){
     uart.begin(9600, SERIAL_8N1, 16, 17); //Setup GPS Serial Coms
     
 
+
     // Initialize SPIFFS (ESP32 SPI Flash Storage)
     if (!SPIFFS.begin(true)){
+        digitalWrite(RED_LED_PIN, HIGH);
         Serial.println("An Error has occurred while mounting SPIFFS");
-        return;
+        ESP.restart();
     }
 
     wifiSetup();
 
-    for (uint8_t i = 0; i < ALPHA_SMOOTHING_DIVISOR; i++){
-        readAllAdcChannels();
-    }
-
 }
 
 void loop(){
-    readAllAdcChannels();
+    switch (state) {
 
-    dnsServer.processNextRequest();
+        case STARTUP: //Find What State I should be in
+            Serial.println("case STARTUP");
+            ARGB1.fill(ARGB1.Color(255, 165, 0, 0));
+            ARGB1.show();
 
-    while (uart.available() > 0){
-        gps.encode(uart.read());    // get the byte data from the GPS
+            for (uint8_t i = 0; i < ALPHA_SMOOTHING_DIVISOR; i++){
+                readAllAdcChannels();
+                dnsServer.processNextRequest();
+            }
+            state = FIND_GPS;
+
+        break;
+        
+        case FIND_GPS:
+            Serial.println("case FIND_GPS");
+            ARGB1.fill(ARGB1.Color(165, 255, 0, 0));
+            ARGB1.show();
+
+            while(!gps.location.isValid()){
+                if (uart.available() > 0){
+                    gps.encode(uart.read());    // get the byte data from the GPS
+                }
+                dnsServer.processNextRequest();
+            }
+
+            Serial.print(gps.location.lat(),6);//6dp
+            Serial.print(F(","));
+            Serial.println(gps.location.lng(),6);
+
+            state = PRE_IDLE;
+        break;
+
+        case PRE_IDLE:
+            Serial.println("case PRE_IDLE");
+            ARGB1.fill(ARGB1.Color(0, 255, 0, 0));
+            ARGB1.show();
+            
+
+            state = IDLE;
+        break;
+
+        case IDLE:
+            dnsServer.processNextRequest();
+        break;
+
+        case PRE_RECORDING:
+        break;
+
+        case CHARGING:
+        break;
+        
+        case RECORDING:
+        break;
+            
+        default:
+            Serial.println("We hit the default Case, Restarting");
+            delay(1000);
+            ESP.restart();
+        break;
     }
 
-    /*if (recording==false){
-        if (gps.location.isValid()){
-            strip.fill(strip.Color(0, 255, 0)); //Green LEDS
-            strip.show();
-        }
 
-        if (tdsValue > 250){
-            waterPresent = true;
-            isr();
-        }
 
-        if (button1.pressed){ 
-            strip.clear();
-            strip.show();
-            recording = true;
-            button1.pressed = false;
-        }
-        
-    }else{
-        updateTimerAndLEDS();
-    }*/
-   
 }
 
-/*void updateTimerAndLEDS(){
-    if (recording==true && millis() > lastFrame + 20){
-        ledIndicatorPos = (millis()-last_button_time)*((NUMPIXELS*255)/(RECORDING_TIME*1000));
-        if (ledIndicatorPos<(NUMPIXELS*255)){
-            u_int16_t i = ledIndicatorPos;
-            u_int8_t pixel = 0;
-            while (i != 0){
-                if (i > 255){
-                    //strip.setPixelColor(pixel,strip.gamma32(strip.ColorHSV(pixel*(65535/NUMPIXELS),255,255)));
-                    i = i - 255;
-                    pixel++;
-                }else{
-                    strip.setPixelColor(pixel,strip.gamma32(strip.ColorHSV(pixel*(65535/NUMPIXELS),255,i)));
-                    i = 0;
-                    strip.show();
-                }
-                
-            }
-            lastFrame = millis();
-        } else {  
-            appendLineToCSV();
-            recording = false;
-            //strip.clear();
-            //strip.show();
-            lastFrame = 0;       
-            //esp_sleep_enable_timer_wakeup(60* 1000000);//1hrs
-            esp_deep_sleep_start();
-
-        }
-    }
-
-}*/
-
 void wifiSetup(){
+    digitalWrite(YELLOW_LED_PIN, HIGH);
+    Serial.println("wifiSetup()");
     // Wifi Setup ===========================================================
     WiFi.disconnect();
     WiFi.mode(WIFI_OFF); // added to start with the wifi off, avoid crashing
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(ssid, password, 4, 0, 8);
+    //WiFi.softAP(ssid, password, 4, 0, 4);
+    WiFi.softAP(ssid, NULL, 4, 0, 4);
 
     
     // ANDROID 10 WIFI WORKAROUND============================================
@@ -322,14 +319,11 @@ void wifiSetup(){
     // Webserver Setup ===========================================================
     server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER); //setup above function to run when requested from device
     server.begin();
-
+    digitalWrite(YELLOW_LED_PIN, LOW);
 }
 
 void IRAM_ATTR isr(){
-    /*if (millis() - last_button_time > 250 && recording == false){
-        IO0Button.pressed = true;
-        last_button_time = millis();
-    }*/
+    IO0Button.pressed = true;
 }
 
 void readAllAdcChannels(){
