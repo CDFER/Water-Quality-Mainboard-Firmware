@@ -11,7 +11,7 @@
 #include <SPIFFS.h>
 
 //GPS Module
-#include <SoftwareSerial.h>
+//#include <SoftwareSerial.h>
 #include <TinyGPS++.h>
 
 //Analog Input
@@ -21,11 +21,6 @@
 //Adressable LEDs
 #include <Adafruit_NeoPixel.h>
 
-struct Button{
-    const uint8_t PIN;
-    bool pressed;
-};
-
 
 
 const char *ssid = "Piharau II 001";
@@ -33,9 +28,9 @@ const char *password = "W7AvrwJJWg83e2";
 
 char LogFilename[] = "/assets/Water Quality Data.csv";
 
-#define FRAMETIME 1000/50 //frametime in ms
-
 #define RECORDING_TIME 3000 //time to record in milliseconds
+
+
 
 #define GPSTX_PIN 17
 #define GPSRX_PIN 16
@@ -51,7 +46,7 @@ char LogFilename[] = "/assets/Water Quality Data.csv";
 #define YELLOW_LED_PIN 26
 #define GREEN_LED_PIN 27
 
-#define ARGB1_PIN 13
+#define ARGB1_PIN 13  
 #define ARGB1_PIXELS 15
 Adafruit_NeoPixel ARGB1 = Adafruit_NeoPixel(ARGB1_PIXELS, ARGB1_PIN, NEO_GRBW + NEO_KHZ800);
 
@@ -63,8 +58,6 @@ Adafruit_NeoPixel ARGB2 = Adafruit_NeoPixel(ARGB2_TURBIDITY_PIXELS, ARGB2_TURBID
 #define GPS_POWER 18
 #define LED_POWER 2
 
-
-struct Button IO0Button = {0, false}; //PIN, pressed flag
 
 
 //----- Global Analog Settings -----
@@ -169,7 +162,6 @@ void setup(){
 
     // Setup Serial to PC  ==================================================
     Serial.begin(115200);
-    Serial.println("");
     Serial.println(ssid);
     Serial.println(password);
     Serial.println("UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM), pH (0-14)");
@@ -182,9 +174,6 @@ void setup(){
 
     pinMode(SENSOR_POWER, OUTPUT);
     digitalWrite(SENSOR_POWER, HIGH);
-    
-    pinMode(IO0Button.PIN, INPUT);
-    attachInterrupt(IO0Button.PIN, isr, FALLING);
 
 
     // Setup Analog Input ==================================================
@@ -193,6 +182,7 @@ void setup(){
     } else {
         Serial.println("ADC Vref Factory Setting: NOT Found");
         digitalWrite(RED_LED_PIN, HIGH);
+        delay(1000);
         ESP.restart();
     }
     
@@ -213,6 +203,7 @@ void setup(){
     if (!SPIFFS.begin(true)){
         digitalWrite(RED_LED_PIN, HIGH);
         Serial.println("An Error has occurred while mounting SPIFFS");
+        delay(1000);
         ESP.restart();
     }
 
@@ -320,10 +311,6 @@ void wifiSetup(){
     server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER); //setup above function to run when requested from device
     server.begin();
     digitalWrite(YELLOW_LED_PIN, LOW);
-}
-
-void IRAM_ATTR isr(){
-    IO0Button.pressed = true;
 }
 
 void readAllAdcChannels(){
