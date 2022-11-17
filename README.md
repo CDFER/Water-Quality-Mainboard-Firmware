@@ -1,4 +1,4 @@
-# Water-Quality-Mainboard-Firmware
+# Water-Quality-Mainboard-Firmware (Not currently functional, under developement)
 
 ## How to get this running
 1. instal VS Code
