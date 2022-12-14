@@ -20,7 +20,7 @@
 #include <esp_adc_cal.h>
 
 // Adressable LEDs
-#include <Adafruit_NeoPixel.h>
+#include <NeoPixelBrightnessBus.h>	// instead of NeoPixelBus.h
 
 const char *ssid = "captive";  // FYI The SSID can't have a space in it.
 const char *password = "12345678";
@@ -59,15 +59,33 @@ char LogFilename[] = "/Water Quality Data.csv";
 // float nitratec = 0;
 // float nitrated = 0;
 
-// //State Machine
-enum { STARTUP,
-	   FIND_GPS,
-	   PRE_IDLE,
-	   IDLE,
-	   PRE_RECORDING,
-	   RECORDING,
-	   CHARGING };
-uint8_t state = STARTUP;
+// State Machine
+enum deviceStates { STARTUP_DEVICE,
+					FIND_GPS,
+					PRE_IDLE,
+					IDLE,
+					PRE_RECORDING,
+					RECORDING,
+					CHARGING };
+
+deviceStates state = STARTUP_DEVICE;
+
+enum LEDStates { STARTUP_LEDS,
+				 GREEN_SCAN,
+				 FADE_TO_BLACK,
+				 LED_IDLE,
+				 SOLID_GREEN,
+				 RAINBOW_SCAN,
+				 LED_OFF };
+LEDStates stripState = STARTUP_LEDS;
+
+enum GPSStates { STARTUP_GPS,
+				 FIND_LOCATION,
+				 BACKGROUND_UPDATE,
+				 POWERED_IDLE,
+				 PRE_OFF,
+				 GPS_OFF };
+GPSStates gpsState = STARTUP_GPS;
 
 // void appendLineToCSV();
 // void readADC(adc1_channel_t, uint16_t *);
@@ -76,8 +94,8 @@ uint8_t state = STARTUP;
 void Sensors(void *parameter) {
 	#define SENSOR_POWER 19
 
-	#define BATTERY_PIN ADC1_CHANNEL_0 //SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
-	#define TEMP_OW_PIN 33 // GPIO where the DS18B20 Onewire Temp Pin is connected to
+	#define BATTERY_PIN ADC1_CHANNEL_0	// SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
+	#define TEMP_OW_PIN 33				// GPIO where the DS18B20 Onewire Temp Pin is connected to
 
 	#define TDS_PIN ADC1_CHANNEL_6
 	#define PH_PIN ADC1_CHANNEL_7
@@ -87,13 +105,38 @@ void Sensors(void *parameter) {
 	pinMode(SENSOR_POWER, OUTPUT);
 	digitalWrite(SENSOR_POWER, HIGH);
 
+
+
+	vTaskDelete(NULL);
+}
+
+void adcSensors(void *parameter) {
+	#define BATTERY_PIN ADC1_CHANNEL_0	// SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
+	#define TDS_PIN ADC1_CHANNEL_6
+	#define PH_PIN ADC1_CHANNEL_7
+	#define NITRATE_PIN ADC1_CHANNEL_4
+
+	// Setup Analog Input ==================================================
+	if (esp_adc_cal_check_efuse(ESP_ADC_CAL_VAL_EFUSE_VREF) != ESP_OK) {
+		ESP_LOGE("ADC", "Vref Factory Setting: NOT Found");
+	}
+
+
+	adc1_config_channel_atten(PH_PIN,ADC_ATTEN_DB_11);
+	adc1_config_channel_atten(TDS_PIN,ADC_ATTEN_DB_11);
+	adc1_config_channel_atten(NITRATE_PIN,ADC_ATTEN_DB_11);
+	adc1_config_channel_atten(BATTERY_PIN,ADC_ATTEN_DB_11);
+
+	// esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 0, &adc1_chars);
+	// adc1_config_width(ADC_WIDTH_BIT_12);
+
 	vTaskDelete(NULL);
 }
 
 void debugLEDs(void *parameter) {
-	#define RED_LED_PIN 25
-	#define YELLOW_LED_PIN 26
-	#define GREEN_LED_PIN 27
+#define RED_LED_PIN 25
+#define YELLOW_LED_PIN 26
+#define GREEN_LED_PIN 27
 
 	// Setup GPIO ==================================================
 	pinMode(RED_LED_PIN, OUTPUT);
@@ -108,98 +151,191 @@ void GPS(void *parameter) {
 	#define GPSRX_PIN 16
 	#define GPS_POWER 18
 
-	// // Startup GPS ==================================================
-	pinMode(GPS_POWER, OUTPUT);
-	digitalWrite(GPS_POWER, HIGH);
+
+	const u_int8_t scanInterval = 20;
+	const u_int8_t updateInterval = 100;
+	const u_int16_t idleInterval = 500;
 
 	HardwareSerial uart(1);
 	TinyGPSPlus gps;
 
-	uart.begin(9600, SERIAL_8N1, 16, 17); //Setup GPS Serial Coms
+	while (true) {
+		switch (gpsState) {
+			case STARTUP_GPS:
+				pinMode(GPS_POWER, OUTPUT);
+				digitalWrite(GPS_POWER, HIGH);
+				uart.begin(9600, SERIAL_8N1, 16, 17);  // Setup GPS Serial Coms
+				gpsState = FIND_LOCATION;
+				break;
 
-	vTaskDelete(NULL);
-}
+			case FIND_LOCATION:
+				while(!gps.location.isValid()){
+				    if (uart.available() > 0){
+				        gps.encode(uart.read());    // get the byte data from the GPS
+				    }
+					vTaskDelay(scanInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+				}
 
-void colorWipe(uint32_t color, int wait) {
-	
+				Serial.print(gps.location.lat(), 6);  // 6dp
+				Serial.print(F(","));
+				Serial.println(gps.location.lng(), 6);
+				gpsState = BACKGROUND_UPDATE;
+				break;
+
+			case BACKGROUND_UPDATE:
+				if (uart.available() > 0) {
+					gps.encode(uart.read());  // get the byte data from the GPS
+				}
+				vTaskDelay(updateInterval / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+				break;
+
+			case POWERED_IDLE:
+				vTaskDelay(idleInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+				break;
+
+			case PRE_OFF:
+				digitalWrite(GPS_POWER, LOW);
+				uart.end();
+				gpsState = GPS_OFF;
+				break;
+
+			case GPS_OFF:
+				vTaskDelay(idleInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+				break;
+
+			default:
+				ESP_LOGE("GPS", "hit default -> gpsState = STARTUP_GPS");
+				gpsState = STARTUP_GPS;
+				break;
+		}
+	}
 }
 
 void ARGBLEDs(void *parameter) {
 	#define LED_POWER 2
 	#define ARGB1_PIN 13
 	#define ARGB1_PIXELS 15
-	#define FRAMETIME 20 //Milliseconds 20 = 50fps
+	#define colorSaturation 255	 // saturation of color constants
+	RgbwColor green(0, colorSaturation, 0, 0);
+	RgbwColor red(colorSaturation, 0, 0, 0);
+	RgbwColor black(0, 0, 0, 0);
+	const uint8_t FrameTime = 40;  // Milliseconds 40 = 25fps
+	const uint8_t darkenBy = 32;
+	int8_t moveDir = -1;  // current direction of led spot
+	uint8_t pixel = 0;	  // current position of led spot
+	RgbwColor spotColor;
+	bool stripEnable = false;
+	RgbwColor color;
 
-	Adafruit_NeoPixel ARGB1 = Adafruit_NeoPixel(ARGB1_PIXELS, ARGB1_PIN, NEO_GRBW + NEO_KHZ800);
+	NeoPixelBrightnessBus<NeoGrbwFeature, Neo800KbpsMethod>strip(ARGB1_PIXELS, ARGB1_PIN);
 
-	enum { PULSE_GREEN,
-		SOLID_GREEN,
-		FADE_OUT,
-		BLACK,
-		OFF};
-	uint8_t ARGB1state = OFF;
-
-	uint32_t colour = ARGB1.Color(0, 0, 0, 0);
-
-	// Setup ARGB LEDs ==================================================
-	pinMode(LED_POWER, OUTPUT);
-	digitalWrite(LED_POWER, LOW);
-
-	ARGB1.begin();
-	ARGB1.setBrightness(255);
-	ARGB1.fill(colour);
-
-	digitalWrite(LED_POWER, HIGH);
-	ARGB1.show();
-
-	while (true){
-		switch (ARGB1state) {
-			case PULSE_GREEN:
-				
+	while (true) {
+		switch (stripState) {
+			case STARTUP_LEDS:	// Find What State I should be in
+				ESP_LOGV("LED Strip", "stripState = STARTUP_LEDS");
+				if (stripEnable == false) {
+					// Setup ARGB strip ==================================================
+					pinMode(LED_POWER, OUTPUT);
+					strip.Begin();
+					digitalWrite(LED_POWER, HIGH);
+					strip.Show();
+					stripEnable = true;
+				}
+				stripState = GREEN_SCAN;
 				break;
 
-			case PRE_RECORDING:
+			case GREEN_SCAN:
+			for (uint16_t indexPixel = 0; indexPixel < ARGB1_PIXELS; indexPixel++) {
+					color = strip.GetPixelColor(indexPixel);
+					color.Darken(darkenBy);
+					strip.SetPixelColor(indexPixel, color);
+				}
+
+				if (pixel == ARGB1_PIXELS || pixel == 0) {
+					moveDir = -moveDir;
+				}
+
+				pixel += moveDir;
+				strip.SetPixelColor(pixel, green);
+				strip.Show();
+				vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+
 				break;
 
-			case CHARGING:
+			case FADE_TO_BLACK:
+				ESP_LOGV("LED Strip", "stripState = FADE_TO_BLACK");
+				for (size_t i = 0; i < 255; i++){
+					for (uint16_t indexPixel = 0; indexPixel < ARGB1_PIXELS; indexPixel++) {
+						color = strip.GetPixelColor(indexPixel);
+						color.Darken(darkenBy);
+						strip.SetPixelColor(indexPixel, color);
+					}
+					strip.Show();
+					vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+				}
+				stripState = LED_IDLE;
 				break;
 
-			case RECORDING:
+			case SOLID_GREEN:
+				ESP_LOGV("LED Strip", "stripState = SOLID_GREEN");
+				for (uint16_t indexPixel = 0; indexPixel < ARGB1_PIXELS; indexPixel++) {
+					strip.SetPixelColor(indexPixel, green);
+					vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+				}
+				stripState = LED_IDLE;
+
 				break;
+
+			case RAINBOW_SCAN:
+				for (uint16_t indexPixel = 0; indexPixel < ARGB1_PIXELS; indexPixel++) {
+						color = strip.GetPixelColor(indexPixel);
+						color.Darken(darkenBy);
+						strip.SetPixelColor(indexPixel, color);
+				}
+
+				if (pixel == ARGB1_PIXELS || pixel == 0) {
+						moveDir = -moveDir;
+				}
+
+				pixel += moveDir;
+				strip.SetPixelColor(pixel, red);
+				strip.Show();
+				vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+			break;
+
+			case LED_IDLE:
+			vTaskDelay(FrameTime * 10 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+			break;
+
+			case LED_OFF:
+			ESP_LOGV("LED Strip", "stripState = LED_OFF");
+			for (uint16_t indexPixel = 0; indexPixel < ARGB1_PIXELS; indexPixel++) {
+						strip.SetPixelColor(indexPixel, black);
+			}
+			strip.Show();
+			vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+			digitalWrite(LED_POWER, LOW);
+			stripEnable = false;
+			stripState = LED_IDLE;
+			break;
 
 			default:
-				ESP_LOGE("ARGB1 state machine", "Hit Default, Restarting...");
-				vTaskDelay(1000 / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
-				ESP.restart();
+				ESP_LOGE("LED Strip", "hit default -> stripState = STARTUP_LEDS");
+				stripState = STARTUP_LEDS;
 				break;
 		}
-
-		for (int i = 0; i < ARGB1_PIXELS; i++) {		 // For each pixel in strip...
-			ARGB1.setPixelColor(i, colour);				 //  Set pixel's color (in RAM)
-			ARGB1.show();								 //  Update strip to match
-			vTaskDelay(FRAMETIME / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
-		}
-
-		for (int i = 0; i < ARGB1_PIXELS; i++) {		   // For each pixel in strip...
-			ARGB1.setPixelColor(i, );			   //  Set pixel's color (in RAM)
-			ARGB1.show();							   //  Update strip to match
-			vTaskDelay(FRAMETIME / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
-		}
 	}
-	
-
-	vTaskDelete(NULL);
 }
 
 void turbidity(void *parameter) {
 	#define ARGB2_TURBIDITY_PIN 23
 	#define ARGB2_TURBIDITY_PIXELS 2
-	Adafruit_NeoPixel ARGB2 = Adafruit_NeoPixel(ARGB2_TURBIDITY_PIXELS, ARGB2_TURBIDITY_PIN, NEO_GRBW + NEO_KHZ800);
+	// Adafruit_NeoPixel ARGB2 = Adafruit_NeoPixel(ARGB2_TURBIDITY_PIXELS, ARGB2_TURBIDITY_PIN, NEO_GRBW + NEO_KHZ800);
 
-	ARGB2.begin();
-	ARGB2.setBrightness(255);
-	ARGB2.fill(ARGB2.Color(0, 0, 0, 0));
-	ARGB2.show();
+	// ARGB2.begin();
+	// ARGB2.setBrightness(255);
+	// ARGB2.fill(ARGB2.Color(0, 0, 0, 0));
+	// ARGB2.show();
 
 	vTaskDelete(NULL);
 }
@@ -290,6 +426,7 @@ void setup() {
 		while (!Serial)
 			;
 		ESP_LOGI("Base ESP32 Project", "Compiled " __DATE__ " " __TIME__ " by CD_FER");
+		Serial.flush();
 	#endif
 
 	if (!SPIFFS.begin(true)) {	// Initialize SPIFFS (ESP32 SPI Flash Storage)
@@ -298,78 +435,39 @@ void setup() {
 
 	// 			Function, Name (for debugging), Stack size, Params, Priority, Handle
 	xTaskCreate(accessPoint, "accessPoint", 5000, NULL, 1, NULL);
-	xTaskCreate(powerRails, "powerRails", 5000, NULL, 1, NULL);
 	xTaskCreate(ARGBLEDs, "ARGBLEDs", 5000, NULL, 1, NULL);
 	xTaskCreate(GPS, "GPS", 5000, NULL, 1, NULL);
 
-	// // Setup Analog Input ==================================================
-	// if (esp_adc_cal_check_efuse(ESP_ADC_CAL_VAL_EFUSE_VREF) == ESP_OK) {
-	//     //printf("eFuse Vref: Supported\n");
-	// } else {
-	//     Serial.println("ADC Vref Factory Setting: NOT Found");
-	//     digitalWrite(RED_LED_PIN, HIGH);
-	//     delay(1000);
-	//     ESP.restart();
-	// }
-
-	// //adc1_config_channel_atten(WATER_TEMP_PIN,ADC_ATTEN_DB_11);
-	// adc1_config_channel_atten(PH_PIN,ADC_ATTEN_DB_11);
-	// adc1_config_channel_atten(TDS_PIN,ADC_ATTEN_DB_11);
-	// adc1_config_channel_atten(NITRATE_PIN,ADC_ATTEN_DB_11);
-	// adc1_config_channel_atten(BATTERY_PIN,ADC_ATTEN_DB_11);
-
-	// esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 0, &adc1_chars);
-	// adc1_config_width(ADC_WIDTH_BIT_12);
+	
 }
 
 void loop() {
-	vTaskDelay(1000 / portTICK_PERIOD_MS);	// Keep RTOS Happy when nothing is here
+	vTaskDelay(10 / portTICK_PERIOD_MS);	// Keep RTOS Happy when nothing is here
 	switch (state) {
-		case STARTUP:  // Find What State I should be in
+		case STARTUP_DEVICE:  // Find What State I should be in
 			Serial.println("case STARTUP");
-			ARGB1.fill(ARGB1.Color(255, 165, 0, 0));
-			ARGB1.show();
-
-			// for (uint8_t i = 0; i < ALPHA_SMOOTHING_DIVISOR; i++){
-			//     readAllAdcChannels();
-			//     dnsServer.processNextRequest();
-			// }
 			state = FIND_GPS;
-
 			break;
 
 		case FIND_GPS:
 			Serial.println("case FIND_GPS");
-			ARGB1.fill(ARGB1.Color(165, 255, 0, 0));
-			ARGB1.show();
+			stripState = GREEN_SCAN;
+			while (gpsState == FIND_LOCATION) {
+				vTaskDelay(100 / portTICK_PERIOD_MS);	// Keep RTOS Happy when nothing is here
+			}
 
-			// while(!gps.location.isValid()){
-			//     if (uart.available() > 0){
-			//         gps.encode(uart.read());    // get the byte data from the GPS
-			//     }
-			//     dnsServer.processNextRequest();
-			// }
 
-			// Serial.print(gps.location.lat(),6);//6dp
-			// Serial.print(F(","));
-			// Serial.println(gps.location.lng(),6);
 
 			state = PRE_IDLE;
 			break;
 
 		case PRE_IDLE:
 			Serial.println("case PRE_IDLE");
-			ARGB1.fill(ARGB1.Color(0, 255, 0, 0));
-			ARGB1.show();
-
-			ARGB2.fill(ARGB1.Color(0, 0, 0, 255));
-			ARGB2.show();
-
+			stripState = FADE_TO_BLACK;
 			state = IDLE;
 			break;
 
 		case IDLE:
-			// dnsServer.processNextRequest();
 			break;
 
 		case PRE_RECORDING:
@@ -389,38 +487,6 @@ void loop() {
 	}
 }
 
-// void wifiSetup(){
-//     digitalWrite(YELLOW_LED_PIN, HIGH);
-//     Serial.println("wifiSetup()");
-//     // Wifi Setup ===========================================================
-//     WiFi.disconnect();
-//     WiFi.mode(WIFI_OFF); // added to start with the wifi off, avoid crashing
-//     WiFi.mode(WIFI_AP);
-//     //WiFi.softAP(ssid, password, 4, 0, 4);
-//     WiFi.softAP(ssid, NULL, 4, 0, 4);
-
-//     // ANDROID 10 WIFI WORKAROUND============================================
-//     delay(500); // seems like this delay is quite important or not...?
-//     WiFi.disconnect(); //Stop wifi to change config parameters
-//     esp_wifi_stop();
-//     esp_wifi_deinit();
-//     /*Disabling AMPDU RX is necessary for Android 10 support*/
-//     wifi_init_config_t my_config = WIFI_INIT_CONFIG_DEFAULT();
-//     my_config.ampdu_rx_enable = 0;
-//     esp_wifi_init(&my_config);
-//     esp_wifi_start();
-//     delay(500);
-//     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-
-//     // DNS Server Setup ===========================================================
-//     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);// if DNSServer is started with "*" (catchall) for domain name
-//     dnsServer.start(DNS_PORT, "*", apIP);
-
-//     // Webserver Setup ===========================================================
-//     server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER); //setup above function to run when requested from device
-//     server.begin();
-//     digitalWrite(YELLOW_LED_PIN, LOW);
-// }
 
 // void readAllAdcChannels(){
 //     //readADC(WATER_TEMP_PIN, &waterTempValue);
