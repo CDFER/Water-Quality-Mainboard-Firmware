@@ -20,6 +20,7 @@
 
 // Adressable LEDs
 #include <NeoPixelBus.h>
+#include <NeoPixelAnimator.h>
 
 // Onewire Temp Sensor
 #include <DallasTemperature.h>
@@ -47,12 +48,11 @@ enum deviceStates { STARTUP_DEVICE,
 deviceStates state = STARTUP_DEVICE;
 
 enum LEDStates { STARTUP_LEDS,
-				 GREEN_SCAN,
-				 FADE_TO_BLACK,
-				 LED_IDLE,
-				 SOLID_GREEN,
-				 RAINBOW_SCAN,
-				 LED_OFF };
+				 FADE_TO_OFF,
+				 LED_ANIMATION_UPDATE,
+				 STARTUP_FADE_IN,
+				 LED_OFF,
+				 LED_IDLE };
 LEDStates stripState = STARTUP_LEDS;
 
 enum GPSStates { STARTUP_GPS,
@@ -71,6 +71,26 @@ uint16_t nitrateValue = 0xFFFF;
 u_int32_t waterTempValue = 0xFFFF;
 
 char csvLine[256];
+
+
+const uint16_t PixelCount = 15;	 // make sure to set this to the number of pixels in your strip
+const uint8_t PixelPin = 13;	 // make sure to set this to the correct pin
+
+NeoPixelBus<NeoGrbwFeature, NeoSk6812Method> strip(PixelCount, PixelPin);
+
+NeoPixelAnimator animations(PixelCount, NEO_MILLISECONDS);
+// NEO_MILLISECONDS        1    // ~65 seconds max duration, ms updates
+// NEO_CENTISECONDS       10    // ~10.9 minutes max duration, 10ms updates
+// NEO_DECISECONDS       100    // ~1.8 hours max duration, 100ms updates
+
+// what is stored for state is specific to the need, in this case, the colors.
+// basically what ever you need inside the animation update function
+struct MyAnimationState {
+	RgbwColor StartingColor;
+	RgbwColor EndingColor;
+};
+
+MyAnimationState animationState[1];	 // we only need one as all the pixels are animated at once
 
 void readADC(adc1_channel_t channel, uint16_t *value, uint8_t ALPHA_SMOOTHING, uint8_t ALPHA_SMOOTHING_DIVISOR, esp_adc_cal_characteristics_t *adc1_chars) {
 	uint16_t input;
@@ -295,115 +315,113 @@ void GPS(void *parameter) {
 	}
 }
 
-void ARGBLEDs(void *parameter) {
-#define LED_POWER 2
-#define ARGB1_PIN 13
-#define ARGB1_PIXELS 15
-#define colorSaturation 255	 // saturation of color constants
-	RgbwColor green(0, colorSaturation, 0, 0);
-	// RgbwColor red(colorSaturation, 0, 0, 0);
-	RgbwColor black(0, 0, 0, 0);
-	const uint8_t FrameTime = 40;  // Milliseconds 40 = 25fps
-	const uint8_t darkenBy = 32;
-	int8_t moveDir = -1;	 // current direction of led spot
-	uint8_t indexPixel = 0;	 // current position of led spot
-	// RgbwColor spotColor;
-	bool stripEnable = false;
-	RgbwColor color;
 
-	NeoPixelBus<NeoGrbwFeature, NeoSk6812Method> strip(ARGB1_PIXELS, ARGB1_PIN);
+
+void ARGBLEDs(void *parameter) {
+	#define LED_POWER 2
+	const uint8_t FrameTime = 40;  // Milliseconds 40 = 25fps
+
+
+	RgbwColor fadeInColour = HslColor(0.5f, 1.0f, 0.4f); //this is a light blue
+
+	LEDStates nextState = STARTUP_FADE_IN;
+	stripState = STARTUP_LEDS;
+
+	// //Random Seed Generation
+	// uint32_t seed;
+	// // random works best with a seed that can use 31 bits
+	// // analogRead on a unconnected pin tends toward less than four bits
+	// seed = analogRead(39);
+	// vTaskDelay(10 / portTICK_PERIOD_MS);
+	// for (int shifts = 3; shifts < 31; shifts += 3) {
+	// 	seed ^= analogRead(39) << shifts;
+	// 	delay(1);
+	// }
+	// // Serial.println(seed);
+	// randomSeed(seed);
+
+	void BlendAnimUpdate(const AnimationParam &param);
+
 
 	while (true) {
 		switch (stripState) {
-			case STARTUP_LEDS:	// Find What State I should be in
+			case STARTUP_LEDS:
 				ESP_LOGI("LED Strip", "STARTUP_LEDS");
-				if (stripEnable == false) {
-					pinMode(LED_POWER, OUTPUT);
-					strip.Begin();
-					digitalWrite(LED_POWER, HIGH);
+				pinMode(LED_POWER, OUTPUT);
+				strip.Begin();
+				digitalWrite(LED_POWER, HIGH);
+
+				for (int i = 0; i < 10; ++i) {
 					strip.Show();
-					stripEnable = true;
+					vTaskDelay(10 / portTICK_PERIOD_MS);
 				}
-				
+
+				stripState = nextState;
 				break;
 
-			case GREEN_SCAN:
-				for (uint16_t i = 0; i < ARGB1_PIXELS; i++) {
-					RgbwColor iColor = strip.GetPixelColor(i);
-					iColor.Darken(darkenBy);
-					strip.SetPixelColor(i, iColor);
-				}
+			case STARTUP_FADE_IN:
+				animationState[0].StartingColor = strip.GetPixelColor(0);
+				animationState[0].EndingColor = fadeInColour;
+				animations.StartAnimation(0, 500, BlendAnimUpdate);
 
-				if (indexPixel == ARGB1_PIXELS || indexPixel == 0) {
-					moveDir = -moveDir;
-				}
-
-				indexPixel += moveDir;
-				strip.SetPixelColor(indexPixel, green);
+				stripState = LED_ANIMATION_UPDATE;
+				nextState = FADE_TO_OFF;
 				break;
 
-			case FADE_TO_BLACK:
-				// ESP_LOGI("LED Strip", "stripState = FADE_TO_BLACK");
-				for (size_t i = 0; i < 255; i++) {
-					for (uint16_t indexPixel = 0; indexPixel < ARGB1_PIXELS; indexPixel++) {
-						color = strip.GetPixelColor(indexPixel);
-						color.Darken(darkenBy);
-						strip.SetPixelColor(indexPixel, color);
-					}
+			case FADE_TO_OFF:
+				animationState[0].StartingColor = strip.GetPixelColor(0);
+				animationState[0].EndingColor = RgbwColor(0);  // black
+				animations.StartAnimation(0, 2000, BlendAnimUpdate);
+				stripState = LED_ANIMATION_UPDATE;
+				nextState = LED_OFF;
+				break;
+
+			case LED_ANIMATION_UPDATE:
+				if (animations.IsAnimating()) {
+					animations.UpdateAnimations();
 					strip.Show();
 					vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+				} else {
+					stripState = nextState;
 				}
-				stripState = LED_IDLE;
-				break;
-
-			case SOLID_GREEN:
-				// ESP_LOGI("LED Strip", "stripState = SOLID_GREEN");
-				strip.ClearTo(green);
-				stripState = LED_IDLE;
-				break;
-
-				// case RAINBOW_SCAN:
-				// 	for (uint16_t indexPixel = 0; indexPixel < ARGB1_PIXELS; indexPixel++) {
-				// 		color = strip.GetPixelColor(indexPixel);
-				// 		color.Darken(darkenBy);
-				// 		strip.SetPixelColor(indexPixel, color);
-				// 	}
-
-				// 	if (pixel == ARGB1_PIXELS || pixel == 0) {
-				// 		moveDir = -moveDir;
-				// 	}
-
-				// 	pixel += moveDir;
-				// 	strip.SetPixelColor(pixel, red);
-				// 	strip.Show();
-				// 	vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
-				// 	break;
-
-			case LED_IDLE:
-				vTaskDelay(FrameTime * 10 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
 				break;
 
 			case LED_OFF:
-				// ESP_LOGV("LED Strip", "stripState -> LED_OFF");
-				for (uint16_t indexPixel = 0; indexPixel < ARGB1_PIXELS; indexPixel++) {
-					strip.SetPixelColor(indexPixel, black);
-				}
-
+				strip.ClearTo(0); //set to black
 				strip.Show();
 				vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
 				digitalWrite(LED_POWER, LOW);
-				stripEnable = false;
 				stripState = LED_IDLE;
 				break;
+
+			case LED_IDLE:
+				vTaskDelay(500 / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+				break;
+			
 
 			default:
 				ESP_LOGE("LED Strip", "hit default -> stripState = STARTUP_LEDS");
 				stripState = STARTUP_LEDS;
-				break;
+			break;
+			
 		}
+	}
+}
 
-		strip.Show();
-		vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+// simple blend function
+void BlendAnimUpdate(const AnimationParam &param) {
+	// this gets called for each animation on every time step
+	// progress will start at 0.0 and end at 1.0
+	// we use the blend function on the RgbColor to mix
+	// color based on the progress given to us in the animation
+	RgbwColor updatedColor = RgbwColor::LinearBlend(
+		animationState[param.index].StartingColor,
+		animationState[param.index].EndingColor,
+		param.progress);
+
+	// apply the color to the strip
+	for (uint16_t pixel = 0; pixel < PixelCount; pixel++) {
+		strip.SetPixelColor(pixel, updatedColor);
 	}
 }
 
@@ -500,143 +518,143 @@ void accessPoint(void *parameter) {
 	}
 }
 
-// void appendLineToCSV(void *parameter) {
-// 	// UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM), pH (0-14), Nitrate (PPM TDS)
+/*void appendLineToCSV(void *parameter) {
+	// UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM), pH (0-14), Nitrate (PPM TDS)
 
-// 	//-----Date from GPS-----------------------------------
-// 	char datef[32];
-// 	if (!gps.date.isValid()) {
-// 		strcpy(datef, "****-**-**");
-// 		ESP_LOGW("GPSDate", "not valid");
-// 	} else {
-// 		sprintf(datef, "%02d-%02d-%02d", gps.date.year(), gps.date.month(), gps.date.day());
-// 	}
-// 	//------------------------------------------------------
+	//-----Date from GPS-----------------------------------
+	char datef[32];
+	if (!gps.date.isValid()) {
+		strcpy(datef, "****-**-**");
+		ESP_LOGW("GPSDate", "not valid");
+	} else {
+		sprintf(datef, "%02d-%02d-%02d", gps.date.year(), gps.date.month(), gps.date.day());
+	}
+	//------------------------------------------------------
 
-// 	//-----Time from GPS-----
-// 	char timef[32];
-// 	if (!gps.time.isValid()) {
-// 		strcpy(timef, "**:**:**");
-// 		ESP_LOGW("GPSTime", "not valid");
-// 	} else {
-// 		sprintf(timef, "%02d:%02d:%02d", gps.time.hour(), gps.time.minute(), gps.time.second());
-// 	}
-// 	//------------------------------------------------------
+	//-----Time from GPS-----
+	char timef[32];
+	if (!gps.time.isValid()) {
+		strcpy(timef, "**:**:**");
+		ESP_LOGW("GPSTime", "not valid");
+	} else {
+		sprintf(timef, "%02d:%02d:%02d", gps.time.hour(), gps.time.minute(), gps.time.second());
+	}
+	//------------------------------------------------------
 
-// 	//-----Lat and Long from GPS-----
-// 	char latlngf[32];
-// 	if (!gps.location.isValid()) {
-// 		strcpy(latlngf, "***.******,***.******");
-// 		ESP_LOGW("GPSLatLong", "not valid");
-// 	} else {
-// 		sprintf(latlngf, "%f,%f", gps.location.lat(), gps.location.lng());
-// 		//dtostrf(gps.altitude.meters(), -7, 6, altf);  // 7 characters with 6 decimal place and left aligned (negative width)
-// 	}
-// 	//------------------------------------------------------
+	//-----Lat and Long from GPS-----
+	char latlngf[32];
+	if (!gps.location.isValid()) {
+		strcpy(latlngf, "***.******,***.******");
+		ESP_LOGW("GPSLatLong", "not valid");
+	} else {
+		sprintf(latlngf, "%f,%f", gps.location.lat(), gps.location.lng());
+		//dtostrf(gps.altitude.meters(), -7, 6, altf);  // 7 characters with 6 decimal place and left aligned (negative width)
+	}
+	//------------------------------------------------------
 
-// 	//-----Altitude from GPS--------------------------------
-// 	char altf[8];
-// 	if (!gps.altitude.isValid()) {
-// 		strcpy(altf, "***");
-// 		ESP_LOGW("GPSAltitude", "not valid");
-// 	} else {
-// 		//sprintf(altf, "%f", gps.altitude.meters());
-// 		dtostrf(gps.altitude.meters(), -7, 0, altf);  // 7 characters with 0 decimal place and left aligned (negative width)
-// 	}
-// 	//------------------------------------------------------
+	//-----Altitude from GPS--------------------------------
+	char altf[8];
+	if (!gps.altitude.isValid()) {
+		strcpy(altf, "***");
+		ESP_LOGW("GPSAltitude", "not valid");
+	} else {
+		//sprintf(altf, "%f", gps.altitude.meters());
+		dtostrf(gps.altitude.meters(), -7, 0, altf);  // 7 characters with 0 decimal place and left aligned (negative width)
+	}
+	//------------------------------------------------------
 
-// 	//-----Water Temperature -------------------------------
-// Serial.println(sensors.rawToCelsius(waterTempValue),6);
-// 	float waterTempValue;
-// 	char tempf[8];
-// 	if (waterTempValue <= 0 || waterTempValue > 50) {  // 141 is a disconnected sensor
-// 		strcpy(tempf, "**");
-// 		ESP_LOGW("waterTempSensor", "out of bounds");
-// 	} else {
-// 		//sprintf(tempf, "%f", waterTempValue);
-// 		dtostrf(waterTempValue, -7, 2, tempf);	// 7 characters with 2 decimal place and left aligned (negative width)
-// 	}
-// 	//------------------------------------------------------
+	//-----Water Temperature -------------------------------
+Serial.println(sensors.rawToCelsius(waterTempValue),6);
+	float waterTempValue;
+	char tempf[8];
+	if (waterTempValue <= 0 || waterTempValue > 50) {  // 141 is a disconnected sensor
+		strcpy(tempf, "**");
+		ESP_LOGW("waterTempSensor", "out of bounds");
+	} else {
+		//sprintf(tempf, "%f", waterTempValue);
+		dtostrf(waterTempValue, -7, 2, tempf);	// 7 characters with 2 decimal place and left aligned (negative width)
+	}
+	//------------------------------------------------------
 
-// 	//-----TDS Conversion from Raw to PPM -----
-// 	// Regression Calibration of pH y=a+bx+cx^2
-// 	float tdsa = -54.0;
-// 	float tdsb = 0.368;
-// 	float tdsc = 0.0000666;
+	//-----TDS Conversion from Raw to PPM -----
+	// Regression Calibration of pH y=a+bx+cx^2
+	float tdsa = -54.0;
+	float tdsb = 0.368;
+	float tdsc = 0.0000666;
 
-// 	char tdsf[8] = "";
+	char tdsf[8] = "";
 
-// 	if (tdsValue <= 142) {	// 141 is a disconnected sensor
-// 		strcpy(tdsf, "***");
-// 		ESP_LOGW("tdsSensor", "tds <= 142, out of bounds");
-// 	} else {
-// 		// Cubic Regression Calibration y=a+bx+cx^2+dx^3
-// 		float tdsOutput = tdsa + tdsb * (tdsValue) + tdsc * pow(tdsValue, 2);
-// 		dtostrf(tdsOutput, -7, 1, tdsf);	 // 7 characters with 1 decimal place and left aligned (negative width)
-// 	}
-// 	//------------------------------------------------------
+	if (tdsValue <= 142) {	// 141 is a disconnected sensor
+		strcpy(tdsf, "***");
+		ESP_LOGW("tdsSensor", "tds <= 142, out of bounds");
+	} else {
+		// Cubic Regression Calibration y=a+bx+cx^2+dx^3
+		float tdsOutput = tdsa + tdsb * (tdsValue) + tdsc * pow(tdsValue, 2);
+		dtostrf(tdsOutput, -7, 1, tdsf);	 // 7 characters with 1 decimal place and left aligned (negative width)
+	}
+	//------------------------------------------------------
 
-// 	//-----pH Conversion from Raw to 0-14 ------------------
-// 	// Regression Calibration of pH y=a+bx+cx^2
-// 	float pha = 32.8;
-// 	float phb = -0.0151;
-// 	float phc = 0.00000142;
-// 	// Regression Calibration of pH vs Temp y=a+bx
-// 	float phta = -0.713;
-// 	float phtb = 0.000293;
+	//-----pH Conversion from Raw to 0-14 ------------------
+	// Regression Calibration of pH y=a+bx+cx^2
+	float pha = 32.8;
+	float phb = -0.0151;
+	float phc = 0.00000142;
+	// Regression Calibration of pH vs Temp y=a+bx
+	float phta = -0.713;
+	float phtb = 0.000293;
 
-// 	char phf[8];
+	char phf[8];
 
-// 	// Regression Calibration y=a+bx+cx^2
-// 	float phNoTempCal = pha + phb * (phValue) + phc * pow(phValue, 2);
-// 	// Regression Calibration y=a+bx
-// 	float phOutput = phNoTempCal + phta + phtb * (waterTempValue);
+	// Regression Calibration y=a+bx+cx^2
+	float phNoTempCal = pha + phb * (phValue) + phc * pow(phValue, 2);
+	// Regression Calibration y=a+bx
+	float phOutput = phNoTempCal + phta + phtb * (waterTempValue);
 
-// 	if (phOutput > 13 || phOutput < 1) {
-// 		strcpy(phf, "***");
-// 		ESP_LOGW("phSensor", "ph, out of bounds");
-// 	} else {
-// 		//sprintf(phf, "%f", phOutput);
-// 		dtostrf(phOutput, -7, 2, phf);	// 7 characters with 2 decimal place and left aligned (negative width)
-// 	}
-// 	//------------------------------------------------------
+	if (phOutput > 13 || phOutput < 1) {
+		strcpy(phf, "***");
+		ESP_LOGW("phSensor", "ph, out of bounds");
+	} else {
+		//sprintf(phf, "%f", phOutput);
+		dtostrf(phOutput, -7, 2, phf);	// 7 characters with 2 decimal place and left aligned (negative width)
+	}
+	//------------------------------------------------------
 
-// 	// Cubic Regression Calibration y=a+bx+cx^2+dx^3
-// 	float nitratea = 0;
-// 	float nitrateb = 0;
-// 	float nitratec = 0;
-// 	float nitrated = 0;
+	// Cubic Regression Calibration y=a+bx+cx^2+dx^3
+	float nitratea = 0;
+	float nitrateb = 0;
+	float nitratec = 0;
+	float nitrated = 0;
 
-// 	char csvLine[256];
-// 	// UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM TDS442), pH (0-14)
-// 	sprintf(csvLine, "%s,%s,%s,%s,%s,%s,%s\r\n", datef, timef, latlngf, altf, tempf, tdsf, phf);
-// 	Serial.println(csvLine);
+	char csvLine[256];
+	// UTC_Date(YYYY-MM-DD),UTC_Time(HH:MM:SS),Latitude(Decimal),Longitude(Decimal),Altitude(Meters),Water Temperature(Deg C), TDS (PPM TDS442), pH (0-14)
+	sprintf(csvLine, "%s,%s,%s,%s,%s,%s,%s\r\n", datef, timef, latlngf, altf, tempf, tdsf, phf);
+	Serial.println(csvLine);
 
-// 	File CSV = SPIFFS.open(F(LogFilename), FILE_APPEND);
-// 	if (!CSV) {
-// 		ESP_LOGE("CSV File", "Error opening");
-// 	} else {
-// 		if (CSV.print(csvLine)) {
-// 			ESP_LOGI("CSV File", "File append success");
-// 			CSV.close();
-// 		} else {
-// 			ESP_LOGE("CSV File", "File append failed");
-// 		}
-// 	}
-// 	// char sz[20] = "";
-// 	// float val = -16.893;
-// 	//sprintf(sz, "%f", dtostrf(val, -7, 1, buf));
-// 	// dtostrf(val, -7, 1, sz);  // 7 characters with 1 decimal place and left aligned (negative width)
-// 	// Serial.println(sz);
-// 	vTaskDelete(NULL);
-// }
+	File CSV = SPIFFS.open(F(LogFilename), FILE_APPEND);
+	if (!CSV) {
+		ESP_LOGE("CSV File", "Error opening");
+	} else {
+		if (CSV.print(csvLine)) {
+			ESP_LOGI("CSV File", "File append success");
+			CSV.close();
+		} else {
+			ESP_LOGE("CSV File", "File append failed");
+		}
+	}
+	// char sz[20] = "";
+	// float val = -16.893;
+	//sprintf(sz, "%f", dtostrf(val, -7, 1, buf));
+	// dtostrf(val, -7, 1, sz);  // 7 characters with 1 decimal place and left aligned (negative width)
+	// Serial.println(sz);
+	vTaskDelete(NULL);
+}*/
 
 void logFreeHeap(void *parameter) {
 	uint32_t freeHeap;
 
 	while (true) {
 		freeHeap = ESP.getFreeHeap();
-		if (freeHeap < 160660) {
+		if (freeHeap < 100000) {
 			ESP_LOGW("RTOS", "free bytes in the (data memory) heap is %i bytes", (ESP.getFreeHeap()));
 		}
 		vTaskDelay(500 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
@@ -661,23 +679,23 @@ void loop() {
 			}
 
 			// 			Function, Name (for debugging), Stack size, Params, Priority, Handle
-			xTaskCreate(logFreeHeap, "logFreeHeap", 5000, NULL, 1, NULL);
+			xTaskCreate(logFreeHeap, 	"logFreeHeap", 	5000, NULL, 1, NULL);
 			xTaskCreate(accessPoint, 	"accessPoint", 	5000, NULL, 1, NULL);
 			xTaskCreate(GPS, 			"GPS", 			5000, NULL, 1, NULL);
 			xTaskCreate(debugLEDs, 		"debugLEDs", 	1000, NULL, 1, NULL);
 			xTaskCreate(ARGBLEDs, 		"ARGBLEDs", 	5000, NULL, 1, NULL);
+			xTaskCreate(sensors, 		"sensors", 		5000, NULL, 1, NULL);
 			state = IDLE;
 			break;
 
 		case IDLE:
 			// ESP_LOGI("deviceState", "IDLE");
 			
-			stripState = LED_OFF;
 
-			while (tdsValue < 150 || tdsValue == 0xFFFF) {
-				vTaskDelay(100 / portTICK_PERIOD_MS);
+			// while (tdsValue < 150 || tdsValue == 0xFFFF) {
+			// 	vTaskDelay(100 / portTICK_PERIOD_MS);
 				
-			}
+			// }
 			//state = PRE_RECORDING;
 			break;
 
@@ -710,5 +728,5 @@ void loop() {
 			ESP.restart();
 			break;
 	}
-	// vTaskDelay(1);	// Keep RTOS Happy with a 1 tick delay when there is nothing to do
+	vTaskDelay(1);	// Keep RTOS Happy with a 1 tick delay when there is nothing to do
 }
