@@ -34,7 +34,7 @@ const String localIPURL = "http://4.3.2.1/index.html";	// URL to the webserver
 
 char LogFilename[] = "/Water_Quality_Data.csv";
 
-#define RECORDING_TIME 3000	 // time to record in milliseconds
+#define RECORDING_TIME 10000	 // time to record in milliseconds
 
 // State Machine
 enum deviceStates { STARTUP_DEVICE,
@@ -243,92 +243,91 @@ void GPS(void *parameter) {
 
 	bool gpsErr = false;
 	pinMode(GPS_POWER, OUTPUT);
-	digitalWrite(GPS_POWER, LOW);
 
-	while (true)
-	{
-		digitalWrite(GPS_POWER, LOW);
-		vTaskDelay(500 / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+	Serial2.setRxBufferSize(1024);	// increase buffer from 256 -> 1024 so we don't end up with buffer overflows
+	Serial2.begin(9600);
+
+	while (true) {
+		switch (gpsState) {
+			case STARTUP_GPS:
+				ESP_LOGI("GPS", "STARTUP_GPS");
+				digitalWrite(GPS_POWER, HIGH);
+				gpsErr = false;
+				gpsCycles = 0;
+				gpsState = FIND_LOCATION;
+				break;
+
+			case FIND_LOCATION:
+				ESP_LOGI("GPS", "FIND_LOCATION");
+				while (!gps.location.isUpdated() && gpsErr == false) {
+					while (Serial2.available() > 0) {  // any data waiting?
+						gps.encode(Serial2.read());	   // get the data from the Serial Buffer
+					}
+
+					if (gpsCycles > 100 && gps.charsProcessed() < 10) {
+						ESP_LOGE("GPS", "not getting any GPS data (no chars processed), check wiring");
+						gpsErr = true;
+					}
+
+					if (gps.failedChecksum() > 0) {
+						ESP_LOGW("GPS", "Failed Checksum, could be wiring or buffer overflow...");
+						gpsErr = true;
+					}
+
+					gpsCycles++;
+					vTaskDelay(scanInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+				}
+
+				if (gpsErr == false) {
+					ESP_LOGI("GPS", "Location Found in ~%is", ((scanInterval * gpsCycles) / 1000));
+					if (state == RECORDING) {
+						gpsState = BACKGROUND_UPDATE;
+					} else {
+						gpsState = PRE_OFF;
+					}
+					
+				} else {
+					gpsState = RESTART_GPS;
+				}
+				break;
+
+			case BACKGROUND_UPDATE:
+				while (Serial2.available() > 0) {  // any data waiting?
+					gps.encode(Serial2.read());	   // get the data from the Serial Buffer
+				}
+
+				if (state != RECORDING) {
+					gpsState = PRE_OFF;
+				}
+
+				vTaskDelay(updateInterval / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+				break;
+
+			case PRE_OFF:
+				digitalWrite(GPS_POWER, LOW);
+				gpsState = GPS_OFF;
+				break;
+
+			case GPS_OFF:
+				if (state == RECORDING) {
+					gpsState = STARTUP_GPS;
+				} else {
+					vTaskDelay(idleInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+				}
+				break;
+
+			case RESTART_GPS:
+				digitalWrite(GPS_POWER, LOW);
+				vTaskDelay(500 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+				gpsState = STARTUP_GPS;
+				break;
+
+			default:
+				ESP_LOGE("GPS", "hit default -> gpsState = STARTUP_GPS");
+				gpsState = STARTUP_GPS;
+				break;
+		}
 	}
-	
-
-	// while (true) {
-	// 	switch (gpsState) {
-	// 		case STARTUP_GPS:
-	// 			ESP_LOGI("GPS", "STARTUP_GPS");
-
-	// 			//digitalWrite(GPS_POWER, HIGH);
-
-	// 			gpsErr = false;
-	// 			gpsCycles = 0;
-
-	// 			Serial2.setRxBufferSize(1024);	// increase buffer from 256 -> 1024 so we don't end up with buffer overflows
-	// 			Serial2.begin(9600);
-
-	// 			gpsState = FIND_LOCATION;
-	// 			break;
-
-	// 		case FIND_LOCATION:
-	// 			ESP_LOGI("GPS", "FIND_LOCATION");
-	// 			while (!gps.location.isValid() && gpsErr == false) {
-	// 				while (Serial2.available() > 0) {  // any data waiting?
-	// 					gps.encode(Serial2.read());	   // get the data from the Serial Buffer
-	// 				}
-
-	// 				if (gpsCycles > 100 && gps.charsProcessed() < 10) {
-	// 					ESP_LOGE("GPS", "not getting any GPS data (no chars processed), check wiring");
-	// 					gpsErr = true;
-	// 				}
-
-	// 				if (gps.failedChecksum() > 0) {
-	// 					ESP_LOGW("GPS", "Failed Checksum, could be wiring or buffer overflow...");
-	// 					gpsErr = true;
-	// 				}
-
-	// 				gpsCycles++;
-	// 				vTaskDelay(scanInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
-	// 			}
-
-	// 			if (gpsErr == false) {
-	// 				ESP_LOGI("GPS", "Location Found in ~%is", ((scanInterval * gpsCycles) / 1000));
-	// 				gpsState = PRE_OFF;
-	// 			} else {
-	// 				gpsState = RESTART_GPS;
-	// 			}
-	// 			break;
-
-	// 		case BACKGROUND_UPDATE:
-	// 			while (Serial2.available() > 0) {  // any data waiting?
-	// 				gps.encode(Serial2.read());	   // get the data from the Serial Buffer
-	// 			}
-
-	// 			vTaskDelay(updateInterval / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
-	// 			break;
-
-	// 		case PRE_OFF:
-	// 			ESP_LOGI("GPS", "PRE_OFF");
-	// 			Serial2.end(true);
-	// 			digitalWrite(GPS_POWER, LOW);
-	// 			gpsState = GPS_OFF;
-	// 			break;
-
-	// 		case GPS_OFF:
-	// 			vTaskDelay(idleInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
-	// 			break;
-
-	// 		case RESTART_GPS:
-	// 			digitalWrite(GPS_POWER, LOW);
-	// 			Serial2.end();
-	// 			vTaskDelay(500 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
-	// 			gpsState = STARTUP_GPS;
-	// 			break;
-
-	// 		default:
-	// 			ESP_LOGE("GPS", "hit default -> gpsState = STARTUP_GPS");
-	// 			gpsState = STARTUP_GPS;
-	// 			break;
-	// 	}
-	// }
 }
 
 
@@ -728,7 +727,6 @@ void setup() {
 		;
 	ESP_LOGI("OSWQS", "Compiled " __DATE__ " " __TIME__ " by CD_FER");
 	Serial.flush();
-	
 }
 
 void loop() {
@@ -743,31 +741,23 @@ void loop() {
 			xTaskCreate(logFreeHeap, 	"logFreeHeap", 	5000, NULL, 1, NULL);
 			xTaskCreate(accessPoint, 	"accessPoint", 	5000, NULL, 1, NULL);
 			xTaskCreate(GPS, 			"GPS", 			5000, NULL, 1, NULL);
-			//xTaskCreate(debugLEDs, 		"debugLEDs", 	1000, NULL, 1, NULL);
-			//xTaskCreate(ARGBLEDs, 		"ARGBLEDs", 	5000, NULL, 1, NULL);
-			//xTaskCreate(sensors, 		"sensors", 		5000, NULL, 1, NULL);
+			xTaskCreate(debugLEDs, 		"debugLEDs", 	1000, NULL, 1, NULL);
+			xTaskCreate(ARGBLEDs, 		"ARGBLEDs", 	5000, NULL, 1, NULL);
+			xTaskCreate(sensors, 		"sensors", 		5000, NULL, 1, NULL);
 
-			// pinMode(18, OUTPUT);
-			// for (size_t i = 0; i < 255; i++)
-			// {
-			// 	digitalWrite(18, HIGH);
-			// 	vTaskDelay(1000 / portTICK_PERIOD_MS);
-			// 	digitalWrite(18, LOW);
-			// 	vTaskDelay(1000 / portTICK_PERIOD_MS);
-			// }
 			
 			state = IDLE;
 			break;
 
 		case IDLE:
-			//ESP_LOGI("deviceState", "IDLE");
+			ESP_LOGI("deviceState", "IDLE");
 			
 
-			//while (tdsValue < 150 || tdsValue == 0xFFFF) {
+			while (tdsValue < 150 || tdsValue == 0xFFFF) {
 				vTaskDelay(100 / portTICK_PERIOD_MS);
 				
-			//}
-			//state = PRE_RECORDING;
+			}
+			state = PRE_RECORDING;
 			break;
 
 		case PRE_RECORDING:
