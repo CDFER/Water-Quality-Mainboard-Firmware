@@ -51,6 +51,7 @@ enum LEDStates { STARTUP_LEDS,
 				 FADE_TO_OFF,
 				 LED_ANIMATION_UPDATE,
 				 STARTUP_FADE_IN,
+				 FADE_IN_OUT,
 				 LED_OFF,
 				 LED_IDLE };
 LEDStates stripState = STARTUP_LEDS;
@@ -75,10 +76,15 @@ char csvLine[256];
 
 const uint16_t PixelCount = 15;	 // make sure to set this to the number of pixels in your strip
 const uint8_t PixelPin = 13;	 // make sure to set this to the correct pin
+const uint8_t AnimationChannels = 1;  // we only need one as all the pixels are animated at once
+
+boolean fadeToColor = true;			  // general purpose variable used to store effect state
+
+NeoGamma<NeoGammaTableMethod> colorGamma;  // for any fade animations, best to correct gamma
 
 NeoPixelBus<NeoGrbwFeature, NeoSk6812Method> strip(PixelCount, PixelPin);
 
-NeoPixelAnimator animations(PixelCount, NEO_MILLISECONDS);
+NeoPixelAnimator animations(AnimationChannels, NEO_MILLISECONDS);
 // NEO_MILLISECONDS        1    // ~65 seconds max duration, ms updates
 // NEO_CENTISECONDS       10    // ~10.9 minutes max duration, 10ms updates
 // NEO_DECISECONDS       100    // ~1.8 hours max duration, 100ms updates
@@ -90,7 +96,9 @@ struct MyAnimationState {
 	RgbwColor EndingColor;
 };
 
-MyAnimationState animationState[1];	 // we only need one as all the pixels are animated at once
+MyAnimationState animationState[AnimationChannels];
+
+
 
 void readADC(adc1_channel_t channel, uint16_t *value, uint8_t ALPHA_SMOOTHING, uint8_t ALPHA_SMOOTHING_DIVISOR, esp_adc_cal_characteristics_t *adc1_chars) {
 	uint16_t input;
@@ -223,7 +231,7 @@ void debugLEDs(void *parameter) {
 }
 
 void GPS(void *parameter) {
-	#define GPS_POWER 18
+	#define GPS_POWER  18
 
 	const u_int8_t scanInterval = 50;
 	const u_int16_t updateInterval = 250;
@@ -235,94 +243,102 @@ void GPS(void *parameter) {
 
 	bool gpsErr = false;
 	pinMode(GPS_POWER, OUTPUT);
+	digitalWrite(GPS_POWER, LOW);
 
-	while (true) {
-		switch (gpsState) {
-			case STARTUP_GPS:
-				ESP_LOGI("GPS", "STARTUP_GPS");
-
-				digitalWrite(GPS_POWER, HIGH);
-
-				gpsErr = false;
-				gpsCycles = 0;
-
-				Serial2.setRxBufferSize(1024);	// increase buffer from 256 -> 1024 so we don't end up with buffer overflows
-				Serial2.begin(9600);
-
-				gpsState = FIND_LOCATION;
-				break;
-
-			case FIND_LOCATION:
-				ESP_LOGI("GPS", "FIND_LOCATION");
-				while (!gps.location.isValid() && gpsErr == false) {
-					while (Serial2.available() > 0) {  // any data waiting?
-						gps.encode(Serial2.read());	   // get the data from the Serial Buffer
-					}
-
-					if (gpsCycles > 100 && gps.charsProcessed() < 10) {
-						ESP_LOGE("GPS", "not getting any GPS data (no chars processed), check wiring");
-						gpsErr = true;
-					}
-
-					if (gps.failedChecksum() > 0) {
-						ESP_LOGW("GPS", "Failed Checksum, could be wiring or buffer overflow...");
-						gpsErr = true;
-					}
-
-					gpsCycles++;
-					vTaskDelay(scanInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
-				}
-
-				if (gpsErr == false) {
-					ESP_LOGI("GPS", "Location Found in ~%is", ((scanInterval * gpsCycles) / 1000));
-					gpsState = PRE_OFF;
-				} else {
-					gpsState = RESTART_GPS;
-				}
-
-				break;
-
-			case BACKGROUND_UPDATE:
-				while (Serial2.available() > 0) {  // any data waiting?
-					gps.encode(Serial2.read());	   // get the data from the Serial Buffer
-				}
-
-				vTaskDelay(updateInterval / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
-				break;
-
-			case PRE_OFF:
-				digitalWrite(GPS_POWER, LOW);
-				Serial2.end();
-				gpsState = GPS_OFF;
-				break;
-
-			case GPS_OFF:
-				vTaskDelay(idleInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
-				break;
-
-			case RESTART_GPS:
-				digitalWrite(GPS_POWER, LOW);
-				Serial2.end();
-				vTaskDelay(500 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
-				gpsState = STARTUP_GPS;
-				break;
-
-			default:
-				ESP_LOGE("GPS", "hit default -> gpsState = STARTUP_GPS");
-				gpsState = STARTUP_GPS;
-				break;
-		}
+	while (true)
+	{
+		digitalWrite(GPS_POWER, LOW);
+		vTaskDelay(500 / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
 	}
+	
+
+	// while (true) {
+	// 	switch (gpsState) {
+	// 		case STARTUP_GPS:
+	// 			ESP_LOGI("GPS", "STARTUP_GPS");
+
+	// 			//digitalWrite(GPS_POWER, HIGH);
+
+	// 			gpsErr = false;
+	// 			gpsCycles = 0;
+
+	// 			Serial2.setRxBufferSize(1024);	// increase buffer from 256 -> 1024 so we don't end up with buffer overflows
+	// 			Serial2.begin(9600);
+
+	// 			gpsState = FIND_LOCATION;
+	// 			break;
+
+	// 		case FIND_LOCATION:
+	// 			ESP_LOGI("GPS", "FIND_LOCATION");
+	// 			while (!gps.location.isValid() && gpsErr == false) {
+	// 				while (Serial2.available() > 0) {  // any data waiting?
+	// 					gps.encode(Serial2.read());	   // get the data from the Serial Buffer
+	// 				}
+
+	// 				if (gpsCycles > 100 && gps.charsProcessed() < 10) {
+	// 					ESP_LOGE("GPS", "not getting any GPS data (no chars processed), check wiring");
+	// 					gpsErr = true;
+	// 				}
+
+	// 				if (gps.failedChecksum() > 0) {
+	// 					ESP_LOGW("GPS", "Failed Checksum, could be wiring or buffer overflow...");
+	// 					gpsErr = true;
+	// 				}
+
+	// 				gpsCycles++;
+	// 				vTaskDelay(scanInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+	// 			}
+
+	// 			if (gpsErr == false) {
+	// 				ESP_LOGI("GPS", "Location Found in ~%is", ((scanInterval * gpsCycles) / 1000));
+	// 				gpsState = PRE_OFF;
+	// 			} else {
+	// 				gpsState = RESTART_GPS;
+	// 			}
+	// 			break;
+
+	// 		case BACKGROUND_UPDATE:
+	// 			while (Serial2.available() > 0) {  // any data waiting?
+	// 				gps.encode(Serial2.read());	   // get the data from the Serial Buffer
+	// 			}
+
+	// 			vTaskDelay(updateInterval / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+	// 			break;
+
+	// 		case PRE_OFF:
+	// 			ESP_LOGI("GPS", "PRE_OFF");
+	// 			Serial2.end(true);
+	// 			digitalWrite(GPS_POWER, LOW);
+	// 			gpsState = GPS_OFF;
+	// 			break;
+
+	// 		case GPS_OFF:
+	// 			vTaskDelay(idleInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+	// 			break;
+
+	// 		case RESTART_GPS:
+	// 			digitalWrite(GPS_POWER, LOW);
+	// 			Serial2.end();
+	// 			vTaskDelay(500 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+	// 			gpsState = STARTUP_GPS;
+	// 			break;
+
+	// 		default:
+	// 			ESP_LOGE("GPS", "hit default -> gpsState = STARTUP_GPS");
+	// 			gpsState = STARTUP_GPS;
+	// 			break;
+	// 	}
+	// }
 }
 
 
 
 void ARGBLEDs(void *parameter) {
 	#define LED_POWER 2
-	const uint8_t FrameTime = 40;  // Milliseconds 40 = 25fps
+	const uint8_t FrameTime = 30;  // Milliseconds 30 = ~33.3fps
 
 
-	RgbwColor fadeInColour = HslColor(0.5f, 1.0f, 0.4f); //this is a light blue
+	const RgbwColor fadeInColour = HslColor(0.5f, 1.0f, 0.4f); //this is a light blue
 
 	LEDStates nextState = STARTUP_FADE_IN;
 	stripState = STARTUP_LEDS;
@@ -340,8 +356,10 @@ void ARGBLEDs(void *parameter) {
 	// // Serial.println(seed);
 	// randomSeed(seed);
 
-	void BlendAnimUpdate(const AnimationParam &param);
+	srand(esp_random());
 
+	void BlendAnimUpdate(const AnimationParam &param);
+	void FadeInFadeOutRinseRepeat(float luminance);
 
 	while (true) {
 		switch (stripState) {
@@ -376,6 +394,16 @@ void ARGBLEDs(void *parameter) {
 				nextState = LED_OFF;
 				break;
 
+			case FADE_IN_OUT:
+				if (state == RECORDING) {
+					FadeInFadeOutRinseRepeat(0.5f);	 // 0.0 = black, 0.25 is normal, 0.5 is bright
+					stripState = LED_ANIMATION_UPDATE;
+					nextState = FADE_IN_OUT;
+				}else{
+					stripState = FADE_TO_OFF;
+				}
+				break;
+
 			case LED_ANIMATION_UPDATE:
 				if (animations.IsAnimating()) {
 					animations.UpdateAnimations();
@@ -395,7 +423,12 @@ void ARGBLEDs(void *parameter) {
 				break;
 
 			case LED_IDLE:
-				vTaskDelay(500 / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
+				if (state == RECORDING) {
+					stripState = STARTUP_LEDS;
+					nextState = FADE_IN_OUT;
+				}else{
+					vTaskDelay(250 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+				}
 				break;
 			
 
@@ -408,12 +441,12 @@ void ARGBLEDs(void *parameter) {
 	}
 }
 
-// simple blend function
 void BlendAnimUpdate(const AnimationParam &param) {
 	// this gets called for each animation on every time step
 	// progress will start at 0.0 and end at 1.0
 	// we use the blend function on the RgbColor to mix
 	// color based on the progress given to us in the animation
+
 	RgbwColor updatedColor = RgbwColor::LinearBlend(
 		animationState[param.index].StartingColor,
 		animationState[param.index].EndingColor,
@@ -421,8 +454,35 @@ void BlendAnimUpdate(const AnimationParam &param) {
 
 	// apply the color to the strip
 	for (uint16_t pixel = 0; pixel < PixelCount; pixel++) {
-		strip.SetPixelColor(pixel, updatedColor);
+		strip.SetPixelColor(pixel, colorGamma.Correct(updatedColor));
 	}
+}
+
+void FadeInFadeOutRinseRepeat(float luminance) {
+	if (fadeToColor) {
+		// Fade upto a random color
+		// we use HslColor object as it allows us to easily pick a hue
+		// with the same saturation and luminance so the colors picked
+		// will have similiar overall brightness
+		RgbwColor target = HslColor(random(360) / 360.0f, 1.0f, luminance);
+		uint16_t time = random(800, 2000);
+
+		animationState[0].StartingColor = strip.GetPixelColor(0);
+		animationState[0].EndingColor = target;
+
+		animations.StartAnimation(0, time, BlendAnimUpdate);
+	} else {
+		// fade to black
+		uint16_t time = random(600, 700);
+
+		animationState[0].StartingColor = strip.GetPixelColor(0);
+		animationState[0].EndingColor = RgbwColor(0);
+
+		animations.StartAnimation(0, time, BlendAnimUpdate);
+	}
+
+	// toggle to the next effect state
+	fadeToColor = !fadeToColor;
 }
 
 void turbidity(void *parameter) {
@@ -668,6 +728,7 @@ void setup() {
 		;
 	ESP_LOGI("OSWQS", "Compiled " __DATE__ " " __TIME__ " by CD_FER");
 	Serial.flush();
+	
 }
 
 void loop() {
@@ -682,27 +743,35 @@ void loop() {
 			xTaskCreate(logFreeHeap, 	"logFreeHeap", 	5000, NULL, 1, NULL);
 			xTaskCreate(accessPoint, 	"accessPoint", 	5000, NULL, 1, NULL);
 			xTaskCreate(GPS, 			"GPS", 			5000, NULL, 1, NULL);
-			xTaskCreate(debugLEDs, 		"debugLEDs", 	1000, NULL, 1, NULL);
-			xTaskCreate(ARGBLEDs, 		"ARGBLEDs", 	5000, NULL, 1, NULL);
-			xTaskCreate(sensors, 		"sensors", 		5000, NULL, 1, NULL);
+			//xTaskCreate(debugLEDs, 		"debugLEDs", 	1000, NULL, 1, NULL);
+			//xTaskCreate(ARGBLEDs, 		"ARGBLEDs", 	5000, NULL, 1, NULL);
+			//xTaskCreate(sensors, 		"sensors", 		5000, NULL, 1, NULL);
+
+			// pinMode(18, OUTPUT);
+			// for (size_t i = 0; i < 255; i++)
+			// {
+			// 	digitalWrite(18, HIGH);
+			// 	vTaskDelay(1000 / portTICK_PERIOD_MS);
+			// 	digitalWrite(18, LOW);
+			// 	vTaskDelay(1000 / portTICK_PERIOD_MS);
+			// }
+			
 			state = IDLE;
 			break;
 
 		case IDLE:
-			// ESP_LOGI("deviceState", "IDLE");
+			//ESP_LOGI("deviceState", "IDLE");
 			
 
-			// while (tdsValue < 150 || tdsValue == 0xFFFF) {
-			// 	vTaskDelay(100 / portTICK_PERIOD_MS);
+			//while (tdsValue < 150 || tdsValue == 0xFFFF) {
+				vTaskDelay(100 / portTICK_PERIOD_MS);
 				
-			// }
+			//}
 			//state = PRE_RECORDING;
 			break;
 
 		case PRE_RECORDING:
 			ESP_LOGI("deviceState", "PRE_RECORDING");
-			xTaskCreate(sensors, "sensors", 5000, NULL, 1, NULL);
-			// recording = true;
 			state = RECORDING;
 			break;
 
@@ -714,7 +783,6 @@ void loop() {
 
 		case POST_RECORDING:
 			ESP_LOGI("deviceState", "POST_RECORDING");
-			// recording = false;
 			// xTaskCreate(appendLineToCSV, "appendLineToCSV", 5000, NULL, 1, NULL);
 			state = IDLE;
 			break;
