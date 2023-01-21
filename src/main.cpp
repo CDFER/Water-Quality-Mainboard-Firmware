@@ -19,24 +19,39 @@
 #include <esp_adc_cal.h>
 
 // Adressable LEDs
-#include <NeoPixelBus.h>
 #include <NeoPixelAnimator.h>
+#include <NeoPixelBus.h>
 
 // Onewire Temp Sensor
 #include <DallasTemperature.h>
 #include <OneWire.h>
 
+// -----------------------------------------
+//
+//    Main Settings
+//
+// -----------------------------------------
 const char *ssid = "captive";  // FYI The SSID can't have a space in it.
 const char *password = "12345678";
+char LogFilename[] = "/Water_Quality_Data.csv";
+#define RECORDING_TIME 10000  // time to record in milliseconds
+
+
+// -----------------------------------------
+//
+//    Access Point Settings
+//
+// -----------------------------------------
 const IPAddress localIP(4, 3, 2, 1);					// the IP address the webserver, Samsung requires the IP to be in public space
 const IPAddress gatewayIP(4, 3, 2, 1);					// IP address of the network
 const String localIPURL = "http://4.3.2.1/index.html";	// URL to the webserver
 
-char LogFilename[] = "/Water_Quality_Data.csv";
 
-#define RECORDING_TIME 10000	 // time to record in milliseconds
-
-// State Machine
+// -----------------------------------------
+//
+//    State Machines
+//
+// -----------------------------------------
 enum deviceStates { STARTUP_DEVICE,
 					FIND_GPS,
 					PRE_IDLE,
@@ -65,20 +80,30 @@ enum GPSStates { STARTUP_GPS,
 				 RESTART_GPS };
 GPSStates gpsState = STARTUP_GPS;
 
-// bool recording = false;
+
+// -----------------------------------------
+//
+//    Global Variables
+//
+// -----------------------------------------
 uint16_t tdsValue = 0xFFFF;
 uint16_t phValue = 0xFFFF;
 uint16_t nitrateValue = 0xFFFF;
 u_int32_t waterTempValue = 0xFFFF;
 
-char csvLine[256];
+bool waterDetected = false;
+unsigned long lastWaterDetected = 0;
 
-
-const uint16_t PixelCount = 15;	 // make sure to set this to the number of pixels in your strip
-const uint8_t PixelPin = 13;	 // make sure to set this to the correct pin
+// -----------------------------------------
+//
+//    ARGB Global Variables
+//
+// -----------------------------------------
+const uint16_t PixelCount = 15;	  // make sure to set this to the number of pixels in your strip
+const uint8_t PixelPin = 13;		  // make sure to set this to the correct pin
 const uint8_t AnimationChannels = 1;  // we only need one as all the pixels are animated at once
 
-boolean fadeToColor = true;			  // general purpose variable used to store effect state
+boolean fadeToColor = true;	 // general purpose variable used to store effect state
 
 NeoGamma<NeoGammaTableMethod> colorGamma;  // for any fade animations, best to correct gamma
 
@@ -111,13 +136,14 @@ void readADC(adc1_channel_t channel, uint16_t *value, uint8_t ALPHA_SMOOTHING, u
 }
 
 void adcSensors(void *parameter) {
-#define BATTERY_PIN ADC1_CHANNEL_0	// SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
 #define TDS_PIN ADC1_CHANNEL_6
 #define PH_PIN ADC1_CHANNEL_7
 #define NITRATE_PIN ADC1_CHANNEL_4
 
 #define ALPHA_SMOOTHING 1
 #define ALPHA_SMOOTHING_DIVISOR 100
+
+	vTaskSuspend(NULL);
 
 	esp_adc_cal_characteristics_t adc1_chars;
 
@@ -129,29 +155,26 @@ void adcSensors(void *parameter) {
 	adc1_config_channel_atten(PH_PIN, ADC_ATTEN_DB_11);
 	adc1_config_channel_atten(TDS_PIN, ADC_ATTEN_DB_11);
 	adc1_config_channel_atten(NITRATE_PIN, ADC_ATTEN_DB_11);
-	adc1_config_channel_atten(BATTERY_PIN, ADC_ATTEN_DB_11);
 
 	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 0, &adc1_chars);
 	adc1_config_width(ADC_WIDTH_BIT_12);
 
+	ESP_LOGD("adcSensors", "STARTED");
+
 	while (true) {
 		readADC(TDS_PIN, &tdsValue, ALPHA_SMOOTHING, ALPHA_SMOOTHING_DIVISOR, &adc1_chars);
-		if (state == RECORDING) {
-			readADC(PH_PIN, &phValue, ALPHA_SMOOTHING, ALPHA_SMOOTHING_DIVISOR, &adc1_chars);
-			readADC(NITRATE_PIN, &nitrateValue, ALPHA_SMOOTHING, ALPHA_SMOOTHING_DIVISOR, &adc1_chars);
-			vTaskDelay(10 / portTICK_PERIOD_MS);  // Keep RTOS Happy when there is nothing to do
-		} else {
-			vTaskDelay(100 / portTICK_PERIOD_MS);  // Keep RTOS Happy when there is nothing to do
-		}
+		readADC(PH_PIN, &phValue, ALPHA_SMOOTHING, ALPHA_SMOOTHING_DIVISOR, &adc1_chars);
+		readADC(NITRATE_PIN, &nitrateValue, ALPHA_SMOOTHING, ALPHA_SMOOTHING_DIVISOR, &adc1_chars);
+		vTaskDelay(10 / portTICK_PERIOD_MS);  // Keep RTOS Happy when there is nothing to do
 	}
-
-	vTaskDelete(NULL);
 }
 
 void tempSensor(void *parameter) {
 #define ONE_WIRE_BUS 33	 // GPIO where the DS18B20 Onewire Temp Pin is connected to
 #define RESOLUTION 12	 // 12 Bit temperatures
 #define WAIT_FOR_DATA 750 / (1 << (12 - RESOLUTION))
+
+	vTaskSuspend(NULL);
 
 	vTaskDelay(200 / portTICK_PERIOD_MS);  // allow time for boot of sensor
 
@@ -177,89 +200,98 @@ void tempSensor(void *parameter) {
 	// Async reading of Dallas Temperature Sensors
 	sensors.setWaitForConversion(false);
 
-	// set the resolution of the temperature readings
+	vTaskDelay(100 / portTICK_PERIOD_MS);  // allow time for config of sensor
+
+	// check the resolution of the temperature readings
 	if (sensors.getResolution(insideThermometer) != RESOLUTION) {
 		ESP_LOGE("Onewire Temp Sensor", "Unable to set Resolution of readings");
 	}
 
+	ESP_LOGD("tempSensor", "STARTED");
+
 	while (true) {
-		if (state == RECORDING) {
-			sensors.requestTemperaturesByAddress(insideThermometer);
-			// sensors.requestTemperatures();	// Send the command to get temperatures
-			vTaskDelay(WAIT_FOR_DATA / portTICK_PERIOD_MS);
+		sensors.requestTemperaturesByAddress(insideThermometer);
+		// sensors.requestTemperatures();	// Send the command to get temperatures
+		vTaskDelay(WAIT_FOR_DATA / portTICK_PERIOD_MS);
 
-			u_int32_t input = sensors.getTemp(insideThermometer);
+		u_int32_t input = sensors.getTemp(insideThermometer);
 
-			// Check if reading was successful
-			if (input != DEVICE_DISCONNECTED_C) {
-				waterTempValue = input;
-			} else {
-				ESP_LOGE("Onewire Temp Sensor", "Could not read temperature data: DEVICE_DISCONNECTED_C");
-			}
-
-			// vTaskDelay(10 / portTICK_PERIOD_MS);  // Keep RTOS Happy when there is nothing to do
+		// Check if reading was successful
+		if (input != DEVICE_DISCONNECTED_C) {
+			waterTempValue = input;
 		} else {
-			vTaskDelay(500 / portTICK_PERIOD_MS);  // Keep RTOS Happy when there is nothing to do
+			ESP_LOGE("Onewire Temp Sensor", "Could not read temperature data: DEVICE_DISCONNECTED_C");
 		}
+		vTaskDelay(10 / portTICK_PERIOD_MS);
 	}
 }
 
 void sensors(void *parameter) {
-#define SENSOR_POWER 19
+	const u_int8_t sensorPowerPin = 19;
+	const u_int8_t interval = 250;
+	bool sensorsOn = false;
 
-	// Setup GPIO ==================================================
-	pinMode(SENSOR_POWER, OUTPUT);
-	digitalWrite(SENSOR_POWER, HIGH);
+	TaskHandle_t adcSensorsHandle = NULL;
+	TaskHandle_t tempSensorHandle = NULL;
 
-	xTaskCreate(adcSensors, "adcSensors", 5000, NULL, 1, NULL);
-	xTaskCreate(tempSensor, "tempSensor", 5000, NULL, 1, NULL);
+	pinMode(sensorPowerPin, OUTPUT);
+	digitalWrite(sensorPowerPin, LOW);
 
-	vTaskDelete(NULL);
-}
+	xTaskCreate(adcSensors, "adcSensors", 5000, NULL, 1, &adcSensorsHandle);
+	xTaskCreate(tempSensor, "tempSensor", 5000, NULL, 1, &tempSensorHandle);
 
-void debugLEDs(void *parameter) {
-#define RED_LED_PIN 25
-#define YELLOW_LED_PIN 26
-#define GREEN_LED_PIN 27
+	while (true){
+		if (state == RECORDING && sensorsOn == false){
+			digitalWrite(sensorPowerPin, HIGH);
+			vTaskResume(adcSensorsHandle);
+			vTaskResume(tempSensorHandle);
+			sensorsOn = true;
 
-	// Setup GPIO ==================================================
-	pinMode(RED_LED_PIN, OUTPUT);
-	pinMode(YELLOW_LED_PIN, OUTPUT);
-	pinMode(GREEN_LED_PIN, OUTPUT);
-
-	vTaskDelete(NULL);
+		}else if (state != RECORDING && sensorsOn == true) {
+			vTaskSuspend(adcSensorsHandle);
+			vTaskSuspend(tempSensorHandle);
+			digitalWrite(sensorPowerPin, LOW);
+			sensorsOn = false;
+		}
+		vTaskDelay(interval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
+	}	
 }
 
 void GPS(void *parameter) {
-	#define GPS_POWER  18
+	const u_int8_t gpsPowerPin = 18;
 
 	const u_int8_t scanInterval = 50;
 	const u_int16_t updateInterval = 250;
 	const u_int16_t idleInterval = 500;
 
-	u_int32_t gpsCycles = 0;
+	const u_int16_t timeout = 120; //max time (seconds) without location
+
+	u_int16_t gpsCycles = 0;
 
 	TinyGPSPlus gps;
 
 	bool gpsErr = false;
-	pinMode(GPS_POWER, OUTPUT);
+	pinMode(gpsPowerPin, OUTPUT);
 
 	Serial2.setRxBufferSize(1024);	// increase buffer from 256 -> 1024 so we don't end up with buffer overflows
 	Serial2.begin(9600);
+	while (!Serial){
+		vTaskDelay(scanInterval / portTICK_PERIOD_MS);
+	}
 
 	while (true) {
 		switch (gpsState) {
 			case STARTUP_GPS:
-				ESP_LOGI("GPS", "STARTUP_GPS");
-				digitalWrite(GPS_POWER, HIGH);
+				
+				digitalWrite(gpsPowerPin, HIGH);
 				gpsErr = false;
 				gpsCycles = 0;
 				gpsState = FIND_LOCATION;
+				ESP_LOGD("GPS", "STARTED");
 				break;
 
 			case FIND_LOCATION:
-				ESP_LOGI("GPS", "FIND_LOCATION");
-				while (!gps.location.isUpdated() && gpsErr == false) {
+				while (!gps.location.isUpdated() && gpsErr == false && gpsCycles < ((timeout * 1000) / scanInterval)) {
 					while (Serial2.available() > 0) {  // any data waiting?
 						gps.encode(Serial2.read());	   // get the data from the Serial Buffer
 					}
@@ -279,13 +311,20 @@ void GPS(void *parameter) {
 				}
 
 				if (gpsErr == false) {
-					ESP_LOGI("GPS", "Location Found in ~%is", ((scanInterval * gpsCycles) / 1000));
+					//Remember to call lat() or lng() to reset isUpdated() to false
+					if (gpsCycles < ((timeout * 1000) / scanInterval)) {
+						ESP_LOGD("GPS", "%f, %f", gps.location.lat(), gps.location.lng());
+						ESP_LOGD("GPS", "Location Found in %is", ((scanInterval * gpsCycles) / 1000));
+					}else{
+						ESP_LOGW("GPS", "No Location Found in %is", (timeout));
+					}
+
 					if (state == RECORDING) {
 						gpsState = BACKGROUND_UPDATE;
 					} else {
 						gpsState = PRE_OFF;
 					}
-					
+
 				} else {
 					gpsState = RESTART_GPS;
 				}
@@ -304,7 +343,7 @@ void GPS(void *parameter) {
 				break;
 
 			case PRE_OFF:
-				digitalWrite(GPS_POWER, LOW);
+				digitalWrite(gpsPowerPin, LOW);
 				gpsState = GPS_OFF;
 				break;
 
@@ -317,7 +356,7 @@ void GPS(void *parameter) {
 				break;
 
 			case RESTART_GPS:
-				digitalWrite(GPS_POWER, LOW);
+				digitalWrite(gpsPowerPin, LOW);
 				vTaskDelay(500 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
 				gpsState = STARTUP_GPS;
 				break;
@@ -330,30 +369,14 @@ void GPS(void *parameter) {
 	}
 }
 
-
-
 void ARGBLEDs(void *parameter) {
-	#define LED_POWER 2
+#define LED_POWER 2
 	const uint8_t FrameTime = 30;  // Milliseconds 30 = ~33.3fps
 
-
-	const RgbwColor fadeInColour = HslColor(0.5f, 1.0f, 0.4f); //this is a light blue
+	const RgbwColor fadeInColour = HslColor(0.5f, 1.0f, 0.4f);	// this is a light blue
 
 	LEDStates nextState = STARTUP_FADE_IN;
 	stripState = STARTUP_LEDS;
-
-	// //Random Seed Generation
-	// uint32_t seed;
-	// // random works best with a seed that can use 31 bits
-	// // analogRead on a unconnected pin tends toward less than four bits
-	// seed = analogRead(39);
-	// vTaskDelay(10 / portTICK_PERIOD_MS);
-	// for (int shifts = 3; shifts < 31; shifts += 3) {
-	// 	seed ^= analogRead(39) << shifts;
-	// 	delay(1);
-	// }
-	// // Serial.println(seed);
-	// randomSeed(seed);
 
 	srand(esp_random());
 
@@ -363,7 +386,6 @@ void ARGBLEDs(void *parameter) {
 	while (true) {
 		switch (stripState) {
 			case STARTUP_LEDS:
-				ESP_LOGI("LED Strip", "STARTUP_LEDS");
 				pinMode(LED_POWER, OUTPUT);
 				strip.Begin();
 				digitalWrite(LED_POWER, HIGH);
@@ -372,6 +394,7 @@ void ARGBLEDs(void *parameter) {
 					strip.Show();
 					vTaskDelay(10 / portTICK_PERIOD_MS);
 				}
+				ESP_LOGV("LED Strip", "STARTED");
 
 				stripState = nextState;
 				break;
@@ -398,7 +421,7 @@ void ARGBLEDs(void *parameter) {
 					FadeInFadeOutRinseRepeat(0.5f);	 // 0.0 = black, 0.25 is normal, 0.5 is bright
 					stripState = LED_ANIMATION_UPDATE;
 					nextState = FADE_IN_OUT;
-				}else{
+				} else {
 					stripState = FADE_TO_OFF;
 				}
 				break;
@@ -414,7 +437,7 @@ void ARGBLEDs(void *parameter) {
 				break;
 
 			case LED_OFF:
-				strip.ClearTo(0); //set to black
+				strip.ClearTo(0);  // set to black
 				strip.Show();
 				vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
 				digitalWrite(LED_POWER, LOW);
@@ -425,17 +448,15 @@ void ARGBLEDs(void *parameter) {
 				if (state == RECORDING) {
 					stripState = STARTUP_LEDS;
 					nextState = FADE_IN_OUT;
-				}else{
+				} else {
 					vTaskDelay(250 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
 				}
 				break;
-			
 
 			default:
 				ESP_LOGE("LED Strip", "hit default -> stripState = STARTUP_LEDS");
 				stripState = STARTUP_LEDS;
-			break;
-			
+				break;
 		}
 	}
 }
@@ -525,7 +546,9 @@ void accessPoint(void *parameter) {
 
 	esp_wifi_init(&my_config);	// set the new config
 	esp_wifi_start();			// Restart WiFi
-	delay(100);					// this is necessary don't ask me why
+	vTaskDelay(100 / portTICK_PERIOD_MS);  // this is necessary don't ask me why
+
+	ESP_LOGV("AccessPoint", "Startup complete by %ims", (millis()));
 
 	//======================== Webserver ========================
 	// WARNING IOS (and maybe macos) WILL NOT POP UP IF IT CONTAINS THE WORD "Success" https://www.esp8266.com/viewtopic.php?f=34&t=4398
@@ -569,11 +592,34 @@ void accessPoint(void *parameter) {
 
 	server.begin();
 
-	// ESP_LOGI("WebServer", "Startup complete");
+	ESP_LOGV("WebServer", "Startup complete by %ims",(millis()));
 
 	while (true) {
 		dnsServer.processNextRequest();
 		vTaskDelay(DNS_INTERVAL / portTICK_PERIOD_MS);
+	}
+}
+
+void waterDetector(void *parameter) {
+	const uint8_t capacitiveWaterPin = T6;
+	const uint8_t detectedThreshord = 20;
+	const uint8_t notDetectedThreshold = 50;
+	const uint8_t detectionInterval = 100;	// ms
+
+	vTaskDelay(500 / portTICK_PERIOD_MS);
+	while (true) {
+		while (touchRead(capacitiveWaterPin) > detectedThreshord) {
+			vTaskDelay(detectionInterval / portTICK_PERIOD_MS);
+		}
+
+		waterDetected = true;
+		ESP_LOGI("waterDetected", "detected");
+
+		while (touchRead(capacitiveWaterPin) < notDetectedThreshold) {
+			vTaskDelay(detectionInterval / portTICK_PERIOD_MS);
+		}
+
+		waterDetected = false;
 	}
 }
 
@@ -708,72 +754,114 @@ Serial.println(sensors.rawToCelsius(waterTempValue),6);
 	vTaskDelete(NULL);
 }*/
 
-void logFreeHeap(void *parameter) {
-	uint32_t freeHeap;
+void print_wakeup_reason() {
+	esp_sleep_wakeup_cause_t wakeup_reason;
 
-	while (true) {
-		freeHeap = ESP.getFreeHeap();
-		if (freeHeap < 100000) {
-			ESP_LOGW("RTOS", "free bytes in the (data memory) heap is %i bytes", (ESP.getFreeHeap()));
-		}
-		vTaskDelay(500 / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+	wakeup_reason = esp_sleep_get_wakeup_cause();
+
+	switch (wakeup_reason) {
+		case ESP_SLEEP_WAKEUP_EXT0:
+			Serial.println("Wakeup caused by external signal using RTC_IO");
+			break;
+		case ESP_SLEEP_WAKEUP_EXT1:
+			Serial.println("Wakeup caused by external signal using RTC_CNTL");
+			break;
+		case ESP_SLEEP_WAKEUP_TIMER:
+			Serial.println("Wakeup caused by timer");
+			break;
+		case ESP_SLEEP_WAKEUP_TOUCHPAD:
+			Serial.println("Wakeup caused by touchpad");
+			break;
+		case ESP_SLEEP_WAKEUP_ULP:
+			Serial.println("Wakeup caused by ULP program");
+			break;
+		default:
+			Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
+			break;
 	}
 }
 
+void callback() {
+	// placeholder callback function
+}
 
 void setup() {
+#define BATTERY_PIN ADC1_CHANNEL_0	// SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
+
+	Serial.setTxBufferSize(1024);
 	Serial.begin(115200);
-	while (!Serial)
-		;
+	while (!Serial);
 	ESP_LOGI("OSWQS", "Compiled " __DATE__ " " __TIME__ " by CD_FER");
-	Serial.flush();
+	print_wakeup_reason();
+
+	if (SPIFFS.begin()) {  // Initialize SPIFFS (ESP32 SPI Flash Storage)
+		if (SPIFFS.exists(LogFilename)) {
+			ESP_LOGV("File System", "Initialized Correctly by %ims", millis());
+		} else {
+			ESP_LOGE("File System", "Can't find %s", (LogFilename));
+		}
+	} else {
+		ESP_LOGE("File System", "Can't mount SPIFFS");
+	}
 }
 
 void loop() {
 	switch (state) {
 		case STARTUP_DEVICE:
-			// ESP_LOGI("deviceState", "STARTUP_DEVICE");
-			if (!SPIFFS.begin(true)) {	// Initialize SPIFFS (ESP32 SPI Flash Storage)
-				ESP_LOGE("File System Error", "Can't mount SPIFFS");
-			}
 
 			// 			Function, Name (for debugging), Stack size, Params, Priority, Handle
-			xTaskCreate(logFreeHeap, 	"logFreeHeap", 	5000, NULL, 1, NULL);
-			xTaskCreate(accessPoint, 	"accessPoint", 	5000, NULL, 1, NULL);
-			xTaskCreate(GPS, 			"GPS", 			5000, NULL, 1, NULL);
-			xTaskCreate(debugLEDs, 		"debugLEDs", 	1000, NULL, 1, NULL);
-			xTaskCreate(ARGBLEDs, 		"ARGBLEDs", 	5000, NULL, 1, NULL);
-			xTaskCreate(sensors, 		"sensors", 		5000, NULL, 1, NULL);
-
-			
+			xTaskCreate(accessPoint, "accessPoint", 5000, NULL, 1, NULL);
+			xTaskCreate(GPS, "GPS", 5000, NULL, 1, NULL);
+			xTaskCreate(ARGBLEDs, "ARGBLEDs", 5000, NULL, 1, NULL);
+			xTaskCreate(sensors, "sensors", 5000, NULL, 1, NULL);
+			xTaskCreate(waterDetector, "waterDetector", 5000, NULL, 1, NULL);
 			state = IDLE;
+			// pinMode(18, OUTPUT);
+			// digitalWrite(18, HIGH);
+			
 			break;
 
 		case IDLE:
-			ESP_LOGI("deviceState", "IDLE");
-			
+			ESP_LOGV("deviceState", "IDLE");
 
-			while (tdsValue < 150 || tdsValue == 0xFFFF) {
+			// vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+			// while (gpsState != GPS_OFF){
+			// 	vTaskDelay(100 / portTICK_PERIOD_MS);
+			// }
+
+			// // Setup interrupt on Touch Pad 3 (GPIO15)
+			// touchAttachInterrupt(T6, callback, 20);
+
+			// // Configure Touchpad as wakeup source
+			// esp_sleep_enable_touchpad_wakeup();
+
+			// // Go to sleep now
+			// Serial.println("Going to sleep now");
+			// esp_deep_sleep_start();
+
+			while (waterDetected == false) {
 				vTaskDelay(100 / portTICK_PERIOD_MS);
-				
 			}
+
 			state = PRE_RECORDING;
 			break;
 
 		case PRE_RECORDING:
-			ESP_LOGI("deviceState", "PRE_RECORDING");
+			ESP_LOGV("deviceState", "PRE_RECORDING");
 			state = RECORDING;
 			break;
 
 		case RECORDING:
-			ESP_LOGI("deviceState", "RECORDING");
+			ESP_LOGD("deviceState", "RECORDING");
 			vTaskDelay(RECORDING_TIME / portTICK_PERIOD_MS);
 			state = POST_RECORDING;
 			break;
 
 		case POST_RECORDING:
-			ESP_LOGI("deviceState", "POST_RECORDING");
+			ESP_LOGV("deviceState", "POST_RECORDING");
 			// xTaskCreate(appendLineToCSV, "appendLineToCSV", 5000, NULL, 1, NULL);
+			//waterDetected = false;
 			state = IDLE;
 			break;
 
