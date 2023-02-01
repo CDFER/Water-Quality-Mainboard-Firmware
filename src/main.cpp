@@ -91,6 +91,8 @@ uint16_t phValue = 0xFFFF;
 uint16_t nitrateValue = 0xFFFF;
 u_int32_t waterTempValue = 0xFFFF;
 
+uint16_t batteryValue = 0xFFFF;
+
 bool waterDetected = false;
 unsigned long lastWaterDetected = 0;
 
@@ -99,13 +101,14 @@ unsigned long lastWaterDetected = 0;
 //    ARGB Global Variables
 //
 // -----------------------------------------
-const uint16_t PixelCount = 15;	  // make sure to set this to the number of pixels in your strip
+const uint16_t PixelCount = 12;	  // make sure to set this to the number of pixels in your strip
 const uint8_t PixelPin = 13;		  // make sure to set this to the correct pin
 const uint8_t AnimationChannels = 1;  // we only need one as all the pixels are animated at once
 
 boolean fadeToColor = true;	 // general purpose variable used to store effect state
+RgbwColor targetColor = RgbwColor(0);
 
-NeoGamma<NeoGammaTableMethod> colorGamma;  // for any fade animations, best to correct gamma
+NeoGamma<NeoGammaTableMethod> colorGamma;  // for any fade animations it is best to correct gamma (this method uses a table of values to reduce cpu cycles)
 
 NeoPixelBus<NeoGrbwFeature, NeoSk6812Method> strip(PixelCount, PixelPin);
 
@@ -264,7 +267,8 @@ void GPS(void *parameter) {
 	const u_int16_t updateInterval = 250;
 	const u_int16_t idleInterval = 500;
 
-	const u_int16_t timeout = 120; //max time (seconds) without location
+	const u_int16_t scanTimeout = 480; //max time (seconds) without location
+	const u_int16_t backgroundTimeout = 90;  // time to run GPS after location fix (seconds)
 
 	u_int16_t gpsCycles = 0;
 
@@ -286,12 +290,13 @@ void GPS(void *parameter) {
 				digitalWrite(gpsPowerPin, HIGH);
 				gpsErr = false;
 				gpsCycles = 0;
+				gps.location.lat();	 // call lat() or lng() to reset isUpdated() to false
 				gpsState = FIND_LOCATION;
-				ESP_LOGD("GPS", "STARTED");
+				//ESP_LOGD("GPS", "STARTED");
 				break;
 
 			case FIND_LOCATION:
-				while (!gps.location.isUpdated() && gpsErr == false && gpsCycles < ((timeout * 1000) / scanInterval)) {
+				while (!gps.location.isUpdated() && gpsErr == false ) {
 					while (Serial2.available() > 0) {  // any data waiting?
 						gps.encode(Serial2.read());	   // get the data from the Serial Buffer
 					}
@@ -306,40 +311,34 @@ void GPS(void *parameter) {
 						gpsErr = true;
 					}
 
+					if (gpsCycles > ((scanTimeout * 1000) / scanInterval)) {
+						ESP_LOGW("GPS", "No Location Found in %is", (scanTimeout));
+						gpsErr = true;
+					}
+
 					gpsCycles++;
 					vTaskDelay(scanInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
 				}
 
 				if (gpsErr == false) {
 					//Remember to call lat() or lng() to reset isUpdated() to false
-					if (gpsCycles < ((timeout * 1000) / scanInterval)) {
-						ESP_LOGD("GPS", "%f, %f", gps.location.lat(), gps.location.lng());
-						ESP_LOGD("GPS", "Location Found in %is", ((scanInterval * gpsCycles) / 1000));
-					}else{
-						ESP_LOGW("GPS", "No Location Found in %is", (timeout));
-					}
-
-					if (state == RECORDING) {
-						gpsState = BACKGROUND_UPDATE;
-					} else {
-						gpsState = PRE_OFF;
-					}
-
-				} else {
-					gpsState = RESTART_GPS;
+					ESP_LOGD("GPS", "%f, %f, Found in %is", gps.location.lat(), gps.location.lng(), ((scanInterval * gpsCycles) / 1000));
 				}
+				gpsState = BACKGROUND_UPDATE;
 				break;
 
 			case BACKGROUND_UPDATE:
-				while (Serial2.available() > 0) {  // any data waiting?
-					gps.encode(Serial2.read());	   // get the data from the Serial Buffer
-				}
+				gpsErr = false;
+				gpsCycles = 0;
 
-				if (state != RECORDING) {
-					gpsState = PRE_OFF;
+				while (gpsCycles < ((backgroundTimeout * 1000) / updateInterval) || state == RECORDING) {
+					while (Serial2.available() > 0) {  // any data waiting?
+						gps.encode(Serial2.read());	   // get the data from the Serial Buffer and encode it into the variables
+					}
+					gpsCycles++;
+					vTaskDelay(updateInterval / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
 				}
-
-				vTaskDelay(updateInterval / portTICK_PERIOD_MS);  // vTaskDelay wants ticks, not milliseconds
+				gpsState = PRE_OFF;
 				break;
 
 			case PRE_OFF:
@@ -353,6 +352,8 @@ void GPS(void *parameter) {
 				} else {
 					vTaskDelay(idleInterval / portTICK_PERIOD_MS);	// vTaskDelay wants ticks, not milliseconds
 				}
+				//vTaskDelay(120*1000 / portTICK_PERIOD_MS);
+				//gpsState = STARTUP_GPS;
 				break;
 
 			case RESTART_GPS:
@@ -370,8 +371,8 @@ void GPS(void *parameter) {
 }
 
 void ARGBLEDs(void *parameter) {
-#define LED_POWER 2
-	const uint8_t FrameTime = 30;  // Milliseconds 30 = ~33.3fps
+	const uint8_t ledPowerPin = 2;
+	const uint8_t FrameTime = 30;  // Milliseconds between frames 30ms = ~33.3fps
 
 	const RgbwColor fadeInColour = HslColor(0.5f, 1.0f, 0.4f);	// this is a light blue
 
@@ -380,15 +381,17 @@ void ARGBLEDs(void *parameter) {
 
 	srand(esp_random());
 
+	pinMode(ledPowerPin, OUTPUT);
+
 	void BlendAnimUpdate(const AnimationParam &param);
 	void FadeInFadeOutRinseRepeat(float luminance);
 
 	while (true) {
 		switch (stripState) {
 			case STARTUP_LEDS:
-				pinMode(LED_POWER, OUTPUT);
+				
 				strip.Begin();
-				digitalWrite(LED_POWER, HIGH);
+				digitalWrite(ledPowerPin, HIGH);
 
 				for (int i = 0; i < 10; ++i) {
 					strip.Show();
@@ -397,6 +400,7 @@ void ARGBLEDs(void *parameter) {
 				ESP_LOGV("LED Strip", "STARTED");
 
 				stripState = nextState;
+				fadeToColor = false;
 				break;
 
 			case STARTUP_FADE_IN:
@@ -411,12 +415,12 @@ void ARGBLEDs(void *parameter) {
 			case FADE_TO_OFF:
 				animationState[0].StartingColor = strip.GetPixelColor(0);
 				animationState[0].EndingColor = RgbwColor(0);  // black
-				animations.StartAnimation(0, 2000, BlendAnimUpdate);
+				animations.StartAnimation(0, 500, BlendAnimUpdate);
 				stripState = LED_ANIMATION_UPDATE;
 				nextState = LED_OFF;
 				break;
 
-			case FADE_IN_OUT:
+			case FADE_IN_OUT: //animation for recording
 				if (state == RECORDING) {
 					FadeInFadeOutRinseRepeat(0.5f);	 // 0.0 = black, 0.25 is normal, 0.5 is bright
 					stripState = LED_ANIMATION_UPDATE;
@@ -440,7 +444,7 @@ void ARGBLEDs(void *parameter) {
 				strip.ClearTo(0);  // set to black
 				strip.Show();
 				vTaskDelay(FrameTime / portTICK_PERIOD_MS);	 // vTaskDelay wants ticks, not milliseconds
-				digitalWrite(LED_POWER, LOW);
+				digitalWrite(ledPowerPin, LOW);
 				stripState = LED_IDLE;
 				break;
 
@@ -467,38 +471,40 @@ void BlendAnimUpdate(const AnimationParam &param) {
 	// we use the blend function on the RgbColor to mix
 	// color based on the progress given to us in the animation
 
+	float progress = NeoEase::CubicIn(param.progress);  // brightness follows function
+
 	RgbwColor updatedColor = RgbwColor::LinearBlend(
 		animationState[param.index].StartingColor,
 		animationState[param.index].EndingColor,
-		param.progress);
+		progress);
 
-	// apply the color to the strip
-	for (uint16_t pixel = 0; pixel < PixelCount; pixel++) {
-		strip.SetPixelColor(pixel, colorGamma.Correct(updatedColor));
-	}
+	strip.ClearTo(colorGamma.Correct(updatedColor));  // apply the color to every pixel in the strip
+
+	// for (uint16_t pixel = 0; pixel < PixelCount; pixel++) {
+	// 	strip.SetPixelColor(pixel, colorGamma.Correct(updatedColor)); //corrected for human vision using a lookup table
+	// }
 }
 
 void FadeInFadeOutRinseRepeat(float luminance) {
+	
 	if (fadeToColor) {
 		// Fade upto a random color
 		// we use HslColor object as it allows us to easily pick a hue
 		// with the same saturation and luminance so the colors picked
 		// will have similiar overall brightness
-		RgbwColor target = HslColor(random(360) / 360.0f, 1.0f, luminance);
-		uint16_t time = random(800, 2000);
+		targetColor = HslColor(random(360) / 360.0f, 1.0f, luminance);
 
-		animationState[0].StartingColor = strip.GetPixelColor(0);
-		animationState[0].EndingColor = target;
+		animationState[0].StartingColor = RgbwColor(0);	 // black
+		animationState[0].EndingColor = targetColor;
 
-		animations.StartAnimation(0, time, BlendAnimUpdate);
+		animations.StartAnimation(0, 250, BlendAnimUpdate); //120bpm
 	} else {
 		// fade to black
-		uint16_t time = random(600, 700);
 
-		animationState[0].StartingColor = strip.GetPixelColor(0);
-		animationState[0].EndingColor = RgbwColor(0);
+		animationState[0].StartingColor = targetColor;
+		animationState[0].EndingColor = RgbwColor(0); //black
 
-		animations.StartAnimation(0, time, BlendAnimUpdate);
+		animations.StartAnimation(0, 250, BlendAnimUpdate);	 // 120bpm
 	}
 
 	// toggle to the next effect state
@@ -620,6 +626,37 @@ void waterDetector(void *parameter) {
 		}
 
 		waterDetected = false;
+	}
+}
+
+void batteryMonitor(void *parameter) {
+	adc1_channel_t batteryPin = ADC1_CHANNEL_0;
+	const float multiplier = ((10.0 + 33.0)/10.0);	 // SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
+	const uint8_t alphaSmoothing = 1;
+	const uint8_t alphaSmoothingDivider = 240;
+	const uint16_t batteryMinMilliVolts = 2800;
+
+	uint16_t batteryMilliVolts = 0;
+
+	esp_adc_cal_characteristics_t adc1_chars;
+
+	// Setup Analog Input ==================================================
+	if (esp_adc_cal_check_efuse(ESP_ADC_CAL_VAL_EFUSE_VREF) != ESP_OK) {
+		ESP_LOGE("ADC", "Vref Factory Setting: NOT Found");
+	}
+
+	adc1_config_channel_atten(batteryPin, ADC_ATTEN_DB_11);
+	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 0, &adc1_chars);
+
+	while (true) {
+		readADC(batteryPin, &batteryValue, alphaSmoothing, alphaSmoothingDivider, &adc1_chars);
+		batteryMilliVolts = batteryValue * multiplier;
+		if (batteryMilliVolts < batteryMinMilliVolts) {
+			ESP_LOGE("Battery", "Dead!");
+			Serial.println(batteryValue * multiplier);
+		}
+		//Serial.println(batteryValue * multiplier);
+		vTaskDelay(100 / portTICK_PERIOD_MS);
 	}
 }
 
@@ -754,7 +791,7 @@ Serial.println(sensors.rawToCelsius(waterTempValue),6);
 	vTaskDelete(NULL);
 }*/
 
-void print_wakeup_reason() {
+/* void print_wakeup_reason() {
 	esp_sleep_wakeup_cause_t wakeup_reason;
 
 	wakeup_reason = esp_sleep_get_wakeup_cause();
@@ -779,20 +816,17 @@ void print_wakeup_reason() {
 			Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
 			break;
 	}
-}
+} */
 
-void callback() {
-	// placeholder callback function
-}
 
 void setup() {
-#define BATTERY_PIN ADC1_CHANNEL_0	// SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
+//#define BATTERY_PIN ADC1_CHANNEL_0	// SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
 
 	Serial.setTxBufferSize(1024);
 	Serial.begin(115200);
 	while (!Serial);
 	ESP_LOGI("OSWQS", "Compiled " __DATE__ " " __TIME__ " by CD_FER");
-	print_wakeup_reason();
+	//print_wakeup_reason();
 
 	if (SPIFFS.begin()) {  // Initialize SPIFFS (ESP32 SPI Flash Storage)
 		if (SPIFFS.exists(LogFilename)) {
@@ -813,12 +847,10 @@ void loop() {
 			xTaskCreate(accessPoint, "accessPoint", 5000, NULL, 1, NULL);
 			xTaskCreate(GPS, "GPS", 5000, NULL, 1, NULL);
 			xTaskCreate(ARGBLEDs, "ARGBLEDs", 5000, NULL, 1, NULL);
-			xTaskCreate(sensors, "sensors", 5000, NULL, 1, NULL);
+			//xTaskCreate(sensors, "sensors", 5000, NULL, 1, NULL);
 			xTaskCreate(waterDetector, "waterDetector", 5000, NULL, 1, NULL);
+			xTaskCreate(batteryMonitor, "batteryMonitor", 5000, NULL, 1, NULL);
 			state = IDLE;
-			// pinMode(18, OUTPUT);
-			// digitalWrite(18, HIGH);
-			
 			break;
 
 		case IDLE:
@@ -861,7 +893,6 @@ void loop() {
 		case POST_RECORDING:
 			ESP_LOGV("deviceState", "POST_RECORDING");
 			// xTaskCreate(appendLineToCSV, "appendLineToCSV", 5000, NULL, 1, NULL);
-			//waterDetected = false;
 			state = IDLE;
 			break;
 
