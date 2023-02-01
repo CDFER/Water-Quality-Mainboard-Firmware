@@ -26,6 +26,9 @@
 #include <DallasTemperature.h>
 #include <OneWire.h>
 
+//ADS1115 I2C ADC
+#include "ADS1X15.h" 
+
 // -----------------------------------------
 //
 //    Main Settings
@@ -90,6 +93,9 @@ uint16_t tdsValue = 0xFFFF;
 uint16_t phValue = 0xFFFF;
 uint16_t nitrateValue = 0xFFFF;
 u_int32_t waterTempValue = 0xFFFF;
+
+
+uint16_t phADSValue = 0;
 
 uint16_t batteryValue = 0xFFFF;
 
@@ -229,6 +235,42 @@ void tempSensor(void *parameter) {
 	}
 }
 
+void printADS1X15ADC(void *parameter) {
+	// choose your sensor
+	// ADS1013 ADS(0x48);
+	// ADS1014 ADS(0x48);
+	// ADS1015 ADS(0x48);
+	// ADS1113 ADS(0x48);
+	// ADS1114 ADS(0x48);
+	ADS1115 ADS(0x48);
+
+	const uint8_t pin = 0;
+
+	uint16_t raw;
+
+	vTaskSuspend(NULL);
+
+	ADS.begin();
+	ADS.setGain(8);
+	ADS.setDataRate(0);
+
+	// single shot mode
+	ADS.setMode(1);
+	// trigger first read
+	ADS.requestADC(pin);
+
+	ESP_LOGD("ADS1X15ADC", "STARTED");
+
+	while (true) {
+		if (ADS.isReady()) {
+			raw = ADS.readADC(pin);
+			ADS.requestADC(pin);
+			phADSValue = ((phADSValue * 9) + raw) / 10;
+		}
+		vTaskDelay((1000 / 8) + 10 / portTICK_PERIOD_MS);  // in Data Rate 0 the sensor can read 8 times a second
+	}
+}
+
 void sensors(void *parameter) {
 	const u_int8_t sensorPowerPin = 19;
 	const u_int8_t interval = 250;
@@ -236,23 +278,28 @@ void sensors(void *parameter) {
 
 	TaskHandle_t adcSensorsHandle = NULL;
 	TaskHandle_t tempSensorHandle = NULL;
+	TaskHandle_t printADS1X15ADCHandle = NULL;
 
 	pinMode(sensorPowerPin, OUTPUT);
 	digitalWrite(sensorPowerPin, LOW);
+	//digitalWrite(sensorPowerPin, HIGH);
 
 	xTaskCreate(adcSensors, "adcSensors", 5000, NULL, 1, &adcSensorsHandle);
 	xTaskCreate(tempSensor, "tempSensor", 5000, NULL, 1, &tempSensorHandle);
+	xTaskCreate(printADS1X15ADC, "printADS1X15ADC", 5000, NULL, 1, &printADS1X15ADCHandle);
 
 	while (true){
 		if (state == RECORDING && sensorsOn == false){
 			digitalWrite(sensorPowerPin, HIGH);
 			vTaskResume(adcSensorsHandle);
 			vTaskResume(tempSensorHandle);
+			vTaskResume(printADS1X15ADCHandle);
 			sensorsOn = true;
 
 		}else if (state != RECORDING && sensorsOn == true) {
 			vTaskSuspend(adcSensorsHandle);
 			vTaskSuspend(tempSensorHandle);
+			vTaskSuspend(printADS1X15ADCHandle);
 			digitalWrite(sensorPowerPin, LOW);
 			sensorsOn = false;
 		}
@@ -819,9 +866,8 @@ Serial.println(sensors.rawToCelsius(waterTempValue),6);
 } */
 
 
-void setup() {
-//#define BATTERY_PIN ADC1_CHANNEL_0	// SENVP, VBAT - 33k - BATTERY_PIN - 10k AOGND
 
+void setup() {
 	Serial.setTxBufferSize(1024);
 	Serial.begin(115200);
 	while (!Serial);
@@ -847,7 +893,7 @@ void loop() {
 			xTaskCreate(accessPoint, "accessPoint", 5000, NULL, 1, NULL);
 			xTaskCreate(GPS, "GPS", 5000, NULL, 1, NULL);
 			xTaskCreate(ARGBLEDs, "ARGBLEDs", 5000, NULL, 1, NULL);
-			//xTaskCreate(sensors, "sensors", 5000, NULL, 1, NULL);
+			xTaskCreate(sensors, "sensors", 5000, NULL, 1, NULL);
 			xTaskCreate(waterDetector, "waterDetector", 5000, NULL, 1, NULL);
 			xTaskCreate(batteryMonitor, "batteryMonitor", 5000, NULL, 1, NULL);
 			state = IDLE;
